@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WhiteSky Travel — Facturation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/tabler-icons.min.css">
+<link rel="stylesheet" href="/css/app.css">
+<script src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+<script>
+function googleTranslateElementInit(){
+  new google.translate.TranslateElement({pageLanguage:'fr',includedLanguages:'en,ar',layout:google.translate.TranslateElement.InlineLayout.SIMPLE},'google_translate_element');
+}
+</script>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="logo-circle"><i class="ti ti-plane"></i></div>
+      <h1>White Sky Travel Agency</h1>
+      <p>Système de facturation</p>
+    </div>
+    <div class="form-field"><label>Utilisateur</label><input type="text" id="login-user" placeholder="patron ou employe" autocomplete="username"/></div>
+    <div class="form-field"><label>Mot de passe</label><input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"/></div>
+    <button class="btn-login" id="btn-login">Se connecter</button>
+    <div class="login-error" id="login-error"></div>
+    <div class="login-hint"><strong>Patron :</strong> patron / whitesky2024 &nbsp;|&nbsp; <strong>Employé :</strong> employe / staff2024</div>
+  </div>
+</div>
+
+<div id="app-screen" class="hidden">
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon"><i class="ti ti-plane"></i></div>
+        <div><div class="brand-name">White Sky Travel</div><div class="brand-sub">Facturation</div></div>
+      </div>
+      <nav class="nav-section">
+        <div class="nav-item active" data-page="dashboard"><i class="ti ti-layout-dashboard"></i><span>Tableau de bord</span></div>
+        <div class="nav-sep">Clients</div>
+        <div class="nav-item" data-page="clients"><i class="ti ti-users"></i><span>Clients</span></div>
+        <div class="nav-sep">Factures</div>
+        <div class="nav-item" data-page="invoices"><i class="ti ti-file-invoice"></i><span>Factures</span></div>
+        <div class="nav-item" data-page="new-invoice"><i class="ti ti-circle-plus"></i><span>Nouvelle facture</span></div>
+        <div class="nav-sep">Devis</div>
+        <div class="nav-item" data-page="quotes"><i class="ti ti-file-description"></i><span>Devis</span></div>
+        <div class="nav-item" data-page="new-quote"><i class="ti ti-file-plus"></i><span>Nouveau devis</span></div>
+        <div class="nav-sep">Finances</div>
+        <div class="nav-item" data-page="payments"><i class="ti ti-credit-card"></i><span>Paiements</span></div>
+        <div class="nav-item" data-page="reports"><i class="ti ti-chart-bar"></i><span>Rapports</span></div>
+        <div class="nav-sep">Compte</div>
+        <div class="nav-item" data-page="settings"><i class="ti ti-settings"></i><span>Paramètres</span></div>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-pill">
+          <div class="user-avatar" id="user-avatar">P</div>
+          <div class="user-info"><div class="user-name" id="user-name-display">Patron</div><div class="user-role" id="user-role-display">Administrateur</div></div>
+          <button class="logout-btn" id="btn-logout" title="Déconnexion"><i class="ti ti-logout"></i></button>
+        </div>
+      </div>
+      <div id="google_translate_element" style="padding:.5rem .75rem;border-top:1px solid rgba(255,255,255,.1)"></div>
+    </aside>
+    <main class="main-content" id="main-content"><div class="loading-page"><i class="ti ti-loader spin"></i></div></main>
+  </div>
+</div>
+
+<!-- MODAL CLIENT -->
+<div class="modal-bg hidden" id="modal-client">
+  <div class="modal-box" style="max-width:520px">
+    <div class="modal-header"><span class="modal-title" id="modal-client-title">Nouveau client</span><button class="modal-close" onclick="closeModal('modal-client')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-client-id"/>
+      <div class="modal-grid2">
+        <div class="form-group full"><label class="form-label">Nom / Société *</label><input class="form-input" id="c-name" placeholder="BERRO"/></div>
+        <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="c-email"/></div>
+        <div class="form-group"><label class="form-label">Téléphone</label><input class="form-input" id="c-phone"/></div>
+        <div class="form-group"><label class="form-label">Fax</label><input class="form-input" id="c-fax" placeholder="NA"/></div>
+        <div class="form-group full"><label class="form-label">Adresse</label><input class="form-input" id="c-address" placeholder="HAWALLY BLOCK 4 STREET 4"/></div>
+        <div class="form-group"><label class="form-label">Ville / Pays</label><input class="form-input" id="c-city"/></div>
+        <div class="form-group"><label class="form-label">Type</label><select class="form-input" id="c-tag"><option>Nouveau</option><option>Régulier</option><option>VIP</option></select></div>
+        <div class="form-group full"><label class="form-label">Notes</label><textarea class="form-input" id="c-notes" rows="2"></textarea></div>
+      </div>
+    </div>
+    <div class="modal-actions"><button class="btn-secondary" onclick="closeModal('modal-client')">Annuler</button><button class="btn-save" id="btn-save-client">Enregistrer</button></div>
+  </div>
+</div>
+
+<!-- MODAL PAIEMENT -->
+<div class="modal-bg hidden" id="modal-payment">
+  <div class="modal-box" style="max-width:420px">
+    <div class="modal-header">
+      <span class="modal-title"><i class="ti ti-cash" style="vertical-align:-2px;margin-right:7px;color:#1a7a3a"></i>Enregistrer le paiement</span>
+      <button class="modal-close" onclick="closeModal('modal-payment')"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <!-- Résumé facture -->
+      <div class="pay-summary">
+        <div class="pay-summary-row"><span class="lbl">Facture</span><span class="val" id="pay-inv-num">—</span></div>
+        <div class="pay-summary-row"><span class="lbl">Client</span><span class="val" id="pay-inv-client">—</span></div>
+        <div class="pay-summary-row total"><span class="lbl">Montant à encaisser</span><span class="val" id="pay-inv-amount">—</span></div>
+      </div>
+      <!-- Méthode -->
+      <div class="form-group">
+        <label class="form-label">Méthode de paiement *</label>
+        <select class="form-input" id="pay-method">
+          <option value="Cash">💵 Cash</option>
+          <option value="Virement">🏦 Virement bancaire</option>
+          <option value="Chèque">📝 Chèque</option>
+          <option value="Carte">💳 Carte bancaire</option>
+          <option value="Autre">🔄 Autre</option>
+        </select>
+      </div>
+      <!-- Référence -->
+      <div class="form-group">
+        <label class="form-label">Référence / N° chèque <span style="color:#ccc;font-weight:400">(optionnel)</span></label>
+        <input class="form-input" id="pay-reference" placeholder="ex: CHQ-00123, VIR-456…"/>
+      </div>
+      <!-- Notes -->
+      <div class="form-group">
+        <label class="form-label">Notes <span style="color:#ccc;font-weight:400">(optionnel)</span></label>
+        <textarea class="form-input" id="pay-notes" rows="2" placeholder="Remarques sur ce paiement…"></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('modal-payment')">Annuler</button>
+      <button class="btn-confirm-pay" id="btn-confirm-pay"><i class="ti ti-check"></i> Confirmer le paiement</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL USER -->
+<div class="modal-bg hidden" id="modal-user">
+  <div class="modal-box" style="max-width:400px">
+    <div class="modal-header"><span class="modal-title" id="modal-user-title">Nouvel utilisateur</span><button class="modal-close" onclick="closeModal('modal-user')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-user-id"/>
+      <div class="form-group"><label class="form-label">Nom affiché</label><input class="form-input" id="u-display"/></div>
+      <div class="form-group"><label class="form-label">Nom d'utilisateur</label><input class="form-input" id="u-username"/></div>
+      <div class="form-group"><label class="form-label">Mot de passe <span id="u-pass-hint" style="font-weight:400;color:#aaa">(laisser vide = inchangé)</span></label><input type="password" class="form-input" id="u-password"/></div>
+      <div class="form-group"><label class="form-label">Rôle</label><select class="form-input" id="u-role"><option value="employe">Employé</option><option value="patron">Patron</option></select></div>
+    </div>
+    <div class="modal-actions"><button class="btn-secondary" onclick="closeModal('modal-user')">Annuler</button><button class="btn-save" id="btn-save-user">Créer</button></div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+<script src="/js/app.js"></script>
+</body>
+</html>
