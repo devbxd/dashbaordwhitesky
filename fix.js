@@ -14,6 +14,7 @@ const cols=[
   'ALTER TABLE invoices ADD COLUMN subtotal REAL DEFAULT 0',
   'ALTER TABLE invoices ADD COLUMN notes TEXT DEFAULT ""',
   'ALTER TABLE invoices ADD COLUMN due_date TEXT DEFAULT ""',
+  'ALTER TABLE invoice_rows ADD COLUMN airlineRef TEXT DEFAULT ""',
 ];
 
 for(const sql of cols){
