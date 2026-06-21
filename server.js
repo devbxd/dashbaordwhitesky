@@ -61,6 +61,7 @@ db.exec(`
     destination TEXT,
     passenger TEXT,
     airline TEXT,
+    airlineRef TEXT DEFAULT '',
     travel_date TEXT,
     price REAL DEFAULT 0,
     FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
@@ -103,6 +104,9 @@ db.exec(`
 
 // Migration — create ticket_sales if not exists
 try{db.exec(`CREATE TABLE IF NOT EXISTS ticket_sales (id INTEGER PRIMARY KEY AUTOINCREMENT,num TEXT UNIQUE NOT NULL,airline TEXT,pnr TEXT,company TEXT,destination TEXT,passenger TEXT,date TEXT,system_issue TEXT,net_price REAL DEFAULT 0,selling_price REAL DEFAULT 0,status TEXT DEFAULT 'unpaid',notes TEXT,owner_id INTEGER,owner_name TEXT,created_at TEXT DEFAULT (datetime('now')))`);}catch(e){}
+// Migration — add ticket_type and client_id to ticket_sales
+try{db.exec(`ALTER TABLE ticket_sales ADD COLUMN ticket_type TEXT DEFAULT 'individual'`);}catch(e){}
+try{db.exec(`ALTER TABLE ticket_sales ADD COLUMN client_id INTEGER`);}catch(e){}
 
 // Default settings
 const defaultSettings = {
@@ -127,21 +131,8 @@ if (db.prepare('SELECT COUNT(*) as c FROM users').get().c === 0) {
   db.prepare("INSERT INTO users (username,password,role,display_name) VALUES (?,?,?,?)").run('employe', bcrypt.hashSync('whitesky00123',10), 'employe', 'User');
 }
 
-// Seed sample data
-if (db.prepare('SELECT COUNT(*) as c FROM clients').get().c === 0) {
-  db.prepare("INSERT INTO clients (name,email,phone,fax,address,city,tag) VALUES (?,?,?,?,?,?,?)").run('BERRO','berro@email.com','965-99967060','NA','DUBAI','Dubai','VIP');
-  db.prepare("INSERT INTO clients (name,email,phone,address,city,tag) VALUES (?,?,?,?,?,?)").run('Ahmad Mansour','ahmad@gmail.com','+961 70 123 456','Tripoli','Tripoli','Régulier');
-  db.prepare("INSERT INTO clients (name,email,phone,address,city,tag) VALUES (?,?,?,?,?,?)").run('Sara Khalil','sara@outlook.com','+961 71 987 654','Beyrouth','Beyrouth','Nouveau');
 
-  const inv1 = db.prepare("INSERT INTO invoices (num,client_id,client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,subtotal,total,currency,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run('FAC-001',1,'BERRO','DUBAI','965-99967060','NA','pending','2025-01-15','2025-01-22',7,4500,4500,'KWD',1,'Patron');
-  db.prepare("INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,travel_date,price) VALUES (?,?,?,?,?,?,?)").run(inv1.lastInsertRowid,'UDXAY4','BEY/DXB/BEY','ZAHER DEEB','ME','29/12-31/12/24',1000);
-  db.prepare("INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,travel_date,price) VALUES (?,?,?,?,?,?,?)").run(inv1.lastInsertRowid,'VIQY85','BEY/DXB/BEY','WISSAM ELMAWLA','ME','29/12-31/12/24',2000);
-  db.prepare("INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,travel_date,price) VALUES (?,?,?,?,?,?,?)").run(inv1.lastInsertRowid,'VIW64Z','BEY/DXB','SAAD RAMADAN','ME','29/12/24',1500);
 
-  const inv2 = db.prepare("INSERT INTO invoices (num,client_id,client_name,status,date,due_date,subtotal,total,currency,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run('FAC-002',2,'Ahmad Mansour','paid','2025-06-01','2025-06-15',1800,1800,'KWD',2,'Employé');
-  db.prepare("INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,travel_date,price) VALUES (?,?,?,?,?,?,?)").run(inv2.lastInsertRowid,'ABC123','BEY/CDG/BEY','AHMAD MANSOUR','AF','15/06-22/06/25',1800);
-  db.prepare("INSERT INTO payments (invoice_id,invoice_num,client_name,amount,method,date) VALUES (?,?,?,?,?,?)").run(inv2.lastInsertRowid,'FAC-002','Ahmad Mansour',1800,'Virement','2025-06-03');
-}
 
 // Middleware
 app.use(express.json({ limit: '10mb' }));
@@ -221,29 +212,39 @@ app.post('/api/invoices',auth,(req,res)=>{
   const taxA=parseFloat(tax)||0, depA=parseFloat(deposit)||0;
   const r=db.prepare('INSERT INTO invoices (num,client_id,client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
     num,client_id||null,client_name,client_address||'',client_phone||'',client_fax||'',status||'pending',date,due_date,due_days||7,sub,taxA,depA,sub+taxA-depA,currency||'KWD',notes||'',req.session.user.id,req.session.user.display_name);
-  const ins=db.prepare('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,travel_date,price) VALUES (?,?,?,?,?,?,?)');
-  for(const row of(rows||[])) ins.run(r.lastInsertRowid,row.pnr||'',row.destination||'',row.passenger||'',row.airline||'',row.travel_date||'',parseFloat(row.price)||0);
+  const ins=db.prepare('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,airlineRef,travel_date,price) VALUES (?,?,?,?,?,?,?,?)');
+  for(const row of(rows||[])) ins.run(r.lastInsertRowid,row.pnr||'',row.destination||'',row.passenger||'',row.airline||'',row.airlineRef||'',row.travel_date||'',parseFloat(row.price)||0);
   res.json({id:r.lastInsertRowid,num});
 });
 app.put('/api/invoices/:id',auth,(req,res)=>{
   const inv=db.prepare('SELECT * FROM invoices WHERE id=?').get(req.params.id);
   if(!inv) return res.status(404).json({error:'Introuvable'});
-  if(req.session.user.role==="employe"&&inv.owner_id!==req.session.user.id) return res.status(403).json({error:"Access denied"});
+  // Un employé peut modifier une facture s'il en est le propriétaire,
+  // OU si elle est rattachée à un client (= visible dans son dashboard).
+  // Les factures du patron sans client_id restent inaccessibles.
+  if(req.session.user.role==="employe"&&inv.owner_id!==req.session.user.id&&!inv.client_id) return res.status(403).json({error:"Access denied"});
   const {client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,tax,deposit,notes,currency,rows}=req.body;
   const sub=(rows||[]).reduce((a,r)=>a+(parseFloat(r.price)||0),0);
   const taxA=parseFloat(tax)||0, depA=parseFloat(deposit)||0;
   db.prepare('UPDATE invoices SET client_name=?,client_address=?,client_phone=?,client_fax=?,status=?,date=?,due_date=?,due_days=?,subtotal=?,tax=?,deposit=?,total=?,currency=?,notes=? WHERE id=?').run(
     client_name,client_address||'',client_phone||'',client_fax||'',status,date,due_date,due_days||7,sub,taxA,depA,sub+taxA-depA,currency||'KWD',notes||'',req.params.id);
   db.prepare('DELETE FROM invoice_rows WHERE invoice_id=?').run(req.params.id);
-  const ins=db.prepare('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,travel_date,price) VALUES (?,?,?,?,?,?,?)');
-  for(const row of(rows||[])) ins.run(req.params.id,row.pnr||'',row.destination||'',row.passenger||'',row.airline||'',row.travel_date||'',parseFloat(row.price)||0);
+  const ins=db.prepare('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,airlineRef,travel_date,price) VALUES (?,?,?,?,?,?,?,?)');
+  for(const row of(rows||[])) ins.run(req.params.id,row.pnr||'',row.destination||'',row.passenger||'',row.airline||'',row.airlineRef||'',row.travel_date||'',parseFloat(row.price)||0);
   res.json({success:true});
 });
-app.patch('/api/invoices/:id/status',auth,(req,res)=>{ db.prepare('UPDATE invoices SET status=? WHERE id=?').run(req.body.status,req.params.id); res.json({success:true}); });
+app.patch('/api/invoices/:id/status',auth,(req,res)=>{
+  const inv=db.prepare('SELECT * FROM invoices WHERE id=?').get(req.params.id);
+  if(!inv) return res.status(404).json({error:'Introuvable'});
+  if(req.session.user.role==="employe"&&inv.owner_id!==req.session.user.id&&!inv.client_id) return res.status(403).json({error:"Access denied"});
+  db.prepare('UPDATE invoices SET status=? WHERE id=?').run(req.body.status,req.params.id);
+  res.json({success:true});
+});
 app.delete('/api/invoices/:id',auth,(req,res)=>{
   const inv=db.prepare('SELECT * FROM invoices WHERE id=?').get(req.params.id);
   if(!inv) return res.status(404).json({error:'Introuvable'});
-  if(req.session.user.role==="employe"&&inv.owner_id!==req.session.user.id) return res.status(403).json({error:"Access denied"});
+  // Même règle que pour la modification (cf. PUT ci-dessus)
+  if(req.session.user.role==="employe"&&inv.owner_id!==req.session.user.id&&!inv.client_id) return res.status(403).json({error:"Access denied"});
   db.prepare('DELETE FROM invoice_rows WHERE invoice_id=?').run(req.params.id);
   db.prepare('DELETE FROM invoices WHERE id=?').run(req.params.id);
   res.json({success:true});
@@ -269,15 +270,15 @@ app.get('/api/tickets/:id',auth,(req,res)=>{
   res.json(t);
 });
 app.post('/api/tickets',auth,(req,res)=>{
-  const {num,airline,pnr,company,destination,passenger,date,system_issue,net_price,selling_price,status,notes}=req.body;
-  const r=db.prepare('INSERT INTO ticket_sales (num,airline,pnr,company,destination,passenger,date,system_issue,net_price,selling_price,status,notes,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
-    num,airline||'',pnr||'',company||'',destination||'',passenger||'',date||'',system_issue||'',parseFloat(net_price)||0,parseFloat(selling_price)||0,status||'unpaid',notes||'',req.session.user.id,req.session.user.display_name);
+  const {num,airline,pnr,company,destination,passenger,date,system_issue,net_price,selling_price,status,notes,ticket_type,client_id}=req.body;
+  const r=db.prepare('INSERT INTO ticket_sales (num,airline,pnr,company,destination,passenger,date,system_issue,net_price,selling_price,status,notes,ticket_type,client_id,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
+    num,airline||'',pnr||'',company||'',destination||'',passenger||'',date||'',system_issue||'',parseFloat(net_price)||0,parseFloat(selling_price)||0,status||'unpaid',notes||'',ticket_type||'individual',client_id||null,req.session.user.id,req.session.user.display_name);
   res.json({id:r.lastInsertRowid,num});
 });
 app.put('/api/tickets/:id',auth,(req,res)=>{
-  const {airline,pnr,company,destination,passenger,date,system_issue,net_price,selling_price,status,notes}=req.body;
-  db.prepare('UPDATE ticket_sales SET airline=?,pnr=?,company=?,destination=?,passenger=?,date=?,system_issue=?,net_price=?,selling_price=?,status=?,notes=? WHERE id=?').run(
-    airline||'',pnr||'',company||'',destination||'',passenger||'',date||'',system_issue||'',parseFloat(net_price)||0,parseFloat(selling_price)||0,status||'unpaid',notes||'',req.params.id);
+  const {airline,pnr,company,destination,passenger,date,system_issue,net_price,selling_price,status,notes,ticket_type,client_id}=req.body;
+  db.prepare('UPDATE ticket_sales SET airline=?,pnr=?,company=?,destination=?,passenger=?,date=?,system_issue=?,net_price=?,selling_price=?,status=?,notes=?,ticket_type=?,client_id=? WHERE id=?').run(
+    airline||'',pnr||'',company||'',destination||'',passenger||'',date||'',system_issue||'',parseFloat(net_price)||0,parseFloat(selling_price)||0,status||'unpaid',notes||'',ticket_type||'individual',client_id||null,req.params.id);
   res.json({success:true});
 });
 app.patch('/api/tickets/:id/status',auth,(req,res)=>{
@@ -362,3 +363,4 @@ app.listen(PORT,'0.0.0.0',()=>{
   console.log(`👤  employe → staff2024`);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
 });
+
