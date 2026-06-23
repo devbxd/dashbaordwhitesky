@@ -105,7 +105,7 @@ ${inv.status==='pending'||inv.status==='overdue'?`<div class="info-box info-box-
     <div><div class="inv-bill-label">Bill to</div><div class="inv-bill-name">${inv.client_name}</div><div class="inv-bill-meta">${inv.client_address?`Address: ${inv.client_address}`:''}${inv.client_phone?`<br>Phone: ${inv.client_phone}`:''}${inv.client_fax?`<br>Fax: ${inv.client_fax}`:''}</div></div>
   </div>
   <div class="inv-pax"><table class="inv-pax-table">
-    <thead><tr><th>PNR #</th><th>Destination</th><th>Passenger</th><th>Airline / Hotel</th><th>Date</th><th>Price</th></tr></thead>
+    <thead><tr><th>PNR #</th><th>Destination</th><th>Passenger</th><th>${rows.some(r=>r.airline==='Hotel')?'Hotel':'Airline'}</th><th>Date</th><th>Price</th></tr></thead>
     <tbody>${rows.length===0?`<tr><td colspan="6" style="text-align:center;color:#bbb;padding:1.5rem">No rows</td></tr>`:rows.map(r=>`<tr><td><span class="inv-pnr">${r.pnr||'—'}</span></td><td>${r.destination||'—'}</td><td>${r.passenger||'—'}</td><td>${r.airlineRef||r.airline||'—'}</td><td>${r.travel_date||'—'}</td><td>$${Number(r.price).toLocaleString('en-US',{minimumFractionDigits:2})}</td></tr>`).join('')}</tbody>
   </table></div>
   <div class="inv-totals"><div class="inv-totals-inner">
@@ -121,7 +121,73 @@ ${inv.status==='pending'||inv.status==='overdue'?`<div class="info-box info-box-
   </div>
 </div></div>`;}
 
-function printInv(){const content=document.getElementById('printable').innerHTML;const win=window.open('','_blank');win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Invoice</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/tabler-icons.min.css"><link rel="stylesheet" href="/css/app.css"><style>body{padding:20px;background:#fff}@media print{body{padding:0}}</style></head><body>${content}<script>window.onload=()=>window.print()<\/script></body></html>`);win.document.close();}
+function printInv(){
+  const inv_content=document.getElementById('printable').innerHTML;
+  const win=window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Invoice</title><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#1a1a2e;background:#fff}
+.inv-wrap{padding:0}
+.inv-head{display:flex;justify-content:space-between;align-items:flex-start;padding:24px 30px 16px;border-bottom:3px solid #0a3258}
+.inv-head-left{display:flex;align-items:center;gap:14px}
+.inv-logo{width:80px;height:80px;object-fit:contain}
+.inv-logo-placeholder{width:80px;height:80px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999}
+.inv-agency-name{font-size:13px;font-weight:700;color:#0a3258;letter-spacing:.04em}
+.inv-head-right{text-align:right}
+.inv-title{font-size:44px;font-weight:900;color:#1A6FB5;letter-spacing:.06em;line-height:1;margin-bottom:10px}
+.inv-meta-grid{display:grid;grid-template-columns:auto auto;gap:3px 16px;font-size:11px}
+.inv-meta-label{color:#999;font-weight:700;text-transform:uppercase;font-size:10px;text-align:right}
+.inv-meta-val{color:#1a1a2e;font-weight:600;text-align:left}
+.inv-bill{display:grid;grid-template-columns:1fr 1fr;gap:30px;padding:16px 30px;border-bottom:1px solid #e5eaf2}
+.inv-bill-label{font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+.inv-bill-name{font-size:13px;font-weight:700;color:#0a3258;margin-bottom:3px}
+.inv-bill-meta{font-size:11px;color:#666;line-height:1.7}
+.inv-pax{padding:16px 30px}
+.inv-pax-table{width:100%;border-collapse:collapse;font-size:11.5px}
+.inv-pax-table th{background:#0a3258;color:#fff;padding:9px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;text-align:left}
+.inv-pax-table th:last-child{text-align:right}
+.inv-pax-table td{padding:9px 12px;border-bottom:1px solid #f0f3f8;vertical-align:middle}
+.inv-pax-table td:last-child{text-align:right;font-weight:700}
+.inv-pax-table tbody tr:nth-child(even) td{background:#f9fbff}
+.inv-pax-table tr:last-child td{border-bottom:none}
+.inv-pnr{font-weight:800;color:#0a3258}
+.inv-totals{display:flex;justify-content:flex-end;padding:0 30px 16px}
+.inv-totals-inner{min-width:260px;border:1px solid #e5eaf2;border-radius:6px;overflow:hidden;font-size:12px}
+.inv-tot-row{display:flex;justify-content:space-between;padding:7px 14px;border-bottom:1px solid #f0f3f8}
+.inv-tot-row:last-child{border-bottom:none}
+.inv-tot-row .lbl{color:#888}
+.inv-tot-row .val{font-weight:600;color:#1a1a2e}
+.inv-tot-final{background:#0a3258!important}
+.inv-tot-final .lbl,.inv-tot-final .val{color:#fff!important;font-weight:700}
+.inv-foot{padding:10px 30px 20px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:1rem;border-top:1px solid #e5eaf2}
+.inv-stamp-area{display:flex;gap:60px}
+.inv-stamp-label{font-size:10px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:.04em;margin-bottom:50px}
+.inv-foot-note{font-size:10px;color:#aaa;text-align:right;line-height:1.8;white-space:pre-line}
+@page{margin:10mm;size:A4}
+@media print{
+  body{padding:0}
+  button{display:none!important}
+}
+  </style></head><body>${inv_content}<script>window.onload=()=>window.print()<\/script></body></html>`);
+  win.document.close();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function fillClient(sel){const o=sel.querySelector(`option[value="${sel.value}"]`);if(!o||!sel.value)return;[['inv-client-name','name'],['inv-client-addr','addr'],['inv-client-phone','phone'],['inv-client-fax','fax']].forEach(([id,k])=>{const el=document.getElementById(id);if(el)el.value=o.dataset[k]||'';});}
 function setAllAirlineType(val){editInvRows.forEach(r=>r.airline=val);renderInvRows();setTimeout(()=>{const sel=document.getElementById('col-airline-type');if(sel)sel.value=val;},10);}
 
@@ -140,7 +206,7 @@ function renderInvForm(mc,inv){
   <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="inv-date" value="${inv.date||today()}"/></div>
   <div class="form-group"><label class="form-label">Due Date</label><input type="date" class="form-input" id="inv-due" value="${inv.due_date||addDays(today(),7)}"/></div>
   <div class="form-group"><label class="form-label">Status</label><select class="form-input" id="inv-status"><option value="draft" ${inv.status==='draft'?'selected':''}>Draft</option><option value="pending" ${inv.status==='pending'?'selected':''}>Pending</option><option value="paid" ${inv.status==='paid'?'selected':''}>Paid</option><option value="overdue" ${inv.status==='overdue'?'selected':''}>Overdue</option></select></div>
-  <div class="form-group"><label class="form-label">Payment terms (days)</label><input type="number" class="form-input" id="inv-due-days" value="${inv.due_days||7}" min="1"/></div>
+  <div class="form-group"><label class="form-label">Payment terms (days)</label><input type="number" class="form-input" id="inv-due-days" value="${inv.due_days||7}" min="1" oninput="document.getElementById('inv-due').value=addDays(document.getElementById('inv-date').value,parseInt(this.value)||7)"/></div>
 </div></div>
 <div class="card"><div class="card-header"><span class="card-title">Client (Bill to)</span></div><div class="form-grid2" style="gap:14px">
   <div class="form-group"><label class="form-label">Select client</label><select class="form-input" id="inv-client" onchange="fillClient(this)"><option value="">-- Select --</option>${allClients.map(c=>`<option value="${c.id}" data-name="${c.name}" data-addr="${c.address||''}" data-phone="${c.phone||''}" data-fax="${c.fax||''}" ${inv.client_id==c.id?'selected':''}>${c.name}</option>`).join('')}</select></div>
@@ -589,7 +655,7 @@ async function savePdfInvoice() {
 
   if (!num || !clientName) { toast('Invoice # and client are required', 'error'); return; }
 
-  const dueDate = date ? addDays(date, 7) : '';
+  const dueDate = '';
 
   const rows = (window._pdfImportRows && window._pdfImportRows.length > 0)
     ? window._pdfImportRows
