@@ -157,7 +157,12 @@ async function initDB() {
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.css')) res.setHeader('Content-Type', 'text/css');
+    if (path.endsWith('.js')) res.setHeader('Content-Type', 'application/javascript');
+  }
+}));
 app.use(session({
   secret: process.env.SESSION_SECRET || 'whitesky-secret-2024',
   resave: false,
