@@ -110,9 +110,15 @@ tbody tr:hover td{background:#f7faff}
 .badge-regular{background:#e8f8ef;color:#1a7a3a}
 
 /* ACTION BTNS */
-.action-btn{background:none;border:none;cursor:pointer;color:#bbb;padding:5px 6px;border-radius:6px;transition:background .15s,color .15s;display:inline-flex;align-items:center}
-.action-btn:hover{background:#eaf1fb;color:#1A6FB5}
-.action-btn.danger:hover{background:#fdecea;color:#b71c1c}
+.action-btn{border:none;cursor:pointer;padding:5px 10px;border-radius:6px;transition:background .15s,color .15s;display:inline-flex;align-items:center;font-size:12px;font-weight:600;gap:4px}
+.action-btn{background:#e8f2fb;color:#1A6FB5;border:1.5px solid #c0d8f0}
+.action-btn:hover{background:#1A6FB5;color:#fff}
+.action-btn.danger{background:#fdecea;color:#b71c1c;border:1.5px solid #f5c6c6}
+.action-btn.danger:hover{background:#b71c1c;color:#fff}
+.action-btn.success{background:#e6f9ee;color:#1a7a3a;border:1.5px solid #b2dfcc}
+.action-btn.success:hover{background:#1a7a3a;color:#fff}
+.action-btn.warning{background:#fff4e0;color:#a05c00;border:1.5px solid #f5d99a}
+.action-btn.warning:hover{background:#a05c00;color:#fff}
 .action-btn i{font-size:15px}
 .actions-cell{display:flex;gap:2px;align-items:center}
 
