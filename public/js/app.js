@@ -42,10 +42,11 @@ async function pageDashboard(mc){const[invData,rpt]=await Promise.all([api('GET'
   <div class="quick-action" onclick="showPage('new-ticket')"><i class="ti ti-ticket"></i><span>New Ticket</span></div>
   <div class="quick-action" onclick="openClientModal()"><i class="ti ti-user-plus"></i><span>New Client</span></div>
   <div class="quick-action" onclick="showPage('reports')"><i class="ti ti-chart-bar"></i><span>Reports</span></div>
+  <div class="quick-action" onclick="openPdfImport()"><i class="ti ti-file-import"></i><span>Import PDF</span></div>
 </div></div>
 <div class="card"><div class="card-header"><span class="card-title"><i class="ti ti-clock" style="vertical-align:-2px;margin-right:6px;color:#a05c00"></i>Outstanding Invoices</span><button class="btn-secondary" onclick="showPage('invoices')" style="font-size:12px;padding:5px 10px">View all</button></div>
 <div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Due</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-${out.length===0?`<tr><td colspan="7"><div class="empty-state"><i class="ti ti-mood-happy"></i><h3>No outstanding invoices</h3></div></td></tr>`:out.map(i=>`<tr><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewInvoice(${i.id})">${i.num}</td><td>${i.client_name}</td><td>${fmtDate(i.date)}</td><td>${fmtDate(i.due_date)}</td><td style="font-weight:700">${fmt(i.total,i.currency)}</td><td>${statusBadge(i.status)}</td><td class="actions-cell"><button class="action-btn" onclick="viewInvoice(${i.id})"><i class="ti ti-eye"></i></button><button class="action-btn" onclick="openPayModal(${i.id})"><i class="ti ti-check"></i></button></td></tr>`).join('')}
+${out.length===0?`<tr><td colspan="7"><div class="empty-state"><i class="ti ti-mood-happy"></i><h3>No outstanding invoices</h3></div></td></tr>`:out.map(i=>`<tr><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewInvoice(${i.id})">${i.num}</td><td>${i.client_name}</td><td>${fmtDate(i.date)}</td><td>${fmtDate(i.due_date)}</td><td style="font-weight:700">${fmt(i.total,i.currency)}</td><td>${statusBadge(i.status)}</td><td></td></tr>`).join('')}
 </tbody></table></div></div>`;}
 
 /* CLIENTS */
@@ -62,7 +63,7 @@ async function deleteClient(id){if(!confirm('Delete this client?'))return;await 
 
 /* INVOICES LIST */
 async function pageInvoices(mc){allInvoices=await api('GET','/api/invoices');mc.innerHTML=`
-<div class="page-header"><div><div class="page-title">Invoices</div><div class="page-sub">${allInvoices.length} invoice(s)${currentUser.role==='employe'?' — your invoices only':''}</div></div><button class="btn-new" onclick="showPage('new-invoice')"><i class="ti ti-plus"></i> New Invoice</button></div>
+<div class="page-header"><div><div class="page-title">Invoices</div><div class="page-sub">${allInvoices.length} invoice(s)${currentUser.role==='employe'?' — your invoices only':''}</div></div><div class="header-actions"><button class="btn-new" onclick="showPage('new-invoice')"><i class="ti ti-plus"></i> New Invoice</button><button class="btn-secondary" onclick="openPdfImport()"><i class="ti ti-file-import"></i> Import PDF</button></div></div>
 ${currentUser.role==='employe'?`<div class="info-box"><i class="ti ti-info-circle"></i> You can only see your own invoices.</div>`:''}
 <div class="filter-bar"><input type="text" placeholder="Client, number…" id="inv-q" oninput="filterInv()"/><select id="inv-s" onchange="filterInv()"><option value="">All statuses</option><option value="draft">Draft</option><option value="pending">Pending</option><option value="paid">Paid</option><option value="overdue">Overdue</option></select><input type="date" id="inv-from" onchange="filterInv()"/><input type="date" id="inv-to" onchange="filterInv()"/></div>
 <div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Due</th><th>Total</th><th>Status</th><th>Created by</th><th>Actions</th></tr></thead><tbody id="inv-tbody">${invRowsHtml(allInvoices)}</tbody></table></div></div>`;}
@@ -192,7 +193,6 @@ function renderTicketForm(mc,t){
   <div class="form-grid2" style="gap:14px">
     <div class="form-group"><label class="form-label">Ticket #</label><input class="form-input" id="tkt-num" value="${t.num||''}" ${_editTicketId?'readonly style="background:#f5f5f5"':''}/></div>
     <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="tkt-date" value="${t.date||today()}"/></div>
-
     <div class="form-group full" id="tkt-company-row" style="display:${isCompany?'block':'none'}">
       <label class="form-label">Company (Client)</label>
       <select class="form-input" id="tkt-client-id" onchange="fillTktCompany(this)">
@@ -204,11 +204,6 @@ function renderTicketForm(mc,t){
       <label class="form-label">Passenger Name</label>
       <input class="form-input" id="tkt-passenger" value="${t.passenger||''}" placeholder="FULL NAME"/>
     </div>
-    <div class="form-group">
-      <label class="form-label">Company Name</label>
-      <input class="form-input" id="tkt-passenger-company" value="${isCompany?(t.passenger||''):(t.passenger||'')}" placeholder="Company name" style="display:${isCompany?'block':'none'}" id="tkt-company-name"/>
-    </div>
-
     <div class="form-group"><label class="form-label">Airline PNR</label><input class="form-input" id="tkt-pnr" value="${t.pnr||''}" placeholder="UDXAY4"/></div>
     <div class="form-group"><label class="form-label">System PNR</label><input class="form-input" id="tkt-company" value="${t.company||''}" placeholder="e.g. Amadeus, Sabre"/></div>
     <div class="form-group"><label class="form-label">Airline</label><input class="form-input" id="tkt-airline" value="${t.airline||''}" placeholder="e.g. ME, QR, EK"/></div>
@@ -223,29 +218,10 @@ function renderTicketForm(mc,t){
   <div class="form-actions"><button class="btn-secondary" onclick="showPage('tickets')">Cancel</button><button class="btn-save" onclick="saveTicket()"><i class="ti ti-send" style="vertical-align:-2px;margin-right:5px"></i>${_editTicketId?'Update':'Save Ticket'}</button></div>
 </div>`;calcProfit();}
 
-function switchTktType(type){
-  document.getElementById('tkt-type').value=type;
-  const isCompany=type==='company';
-  document.getElementById('tkt-type-indiv').className=!isCompany?'btn-new':'btn-secondary';
-  document.getElementById('tkt-type-indiv').style.borderRadius='8px';
-  document.getElementById('tkt-type-company').className=isCompany?'btn-new':'btn-secondary';
-  document.getElementById('tkt-type-company').style.borderRadius='8px';
-  document.getElementById('tkt-company-row').style.display=isCompany?'block':'none';
-  document.getElementById('tkt-passenger-row').style.display=!isCompany?'block':'none';
-}
-function fillTktCompany(sel){
-  const o=sel.querySelector(`option[value="${sel.value}"]`);
-  if(o&&sel.value){
-    document.getElementById('tkt-passenger').value=o.dataset.name||o.textContent;
-  }
-}
+function switchTktType(type){document.getElementById('tkt-type').value=type;const isCompany=type==='company';document.getElementById('tkt-type-indiv').className=!isCompany?'btn-new':'btn-secondary';document.getElementById('tkt-type-indiv').style.borderRadius='8px';document.getElementById('tkt-type-company').className=isCompany?'btn-new':'btn-secondary';document.getElementById('tkt-type-company').style.borderRadius='8px';document.getElementById('tkt-company-row').style.display=isCompany?'block':'none';document.getElementById('tkt-passenger-row').style.display=!isCompany?'block':'none';}
+function fillTktCompany(sel){const o=sel.querySelector(`option[value="${sel.value}"]`);if(o&&sel.value){document.getElementById('tkt-passenger').value=o.dataset.name||o.textContent;}}
 function calcProfit(){const net=parseFloat(document.getElementById('tkt-net')?.value)||0;const sell=parseFloat(document.getElementById('tkt-selling')?.value)||0;const el=document.getElementById('tkt-profit');if(el)el.textContent=fmt(sell-net);}
-async function saveTicket(){
-  const type=document.getElementById('tkt-type')?.value||'individual';
-  const clientId=type==='company'?document.getElementById('tkt-client-id')?.value||null:null;
-  const passenger=document.getElementById('tkt-passenger')?.value.trim()||'';
-  const body={num:document.getElementById('tkt-num')?.value.trim(),date:document.getElementById('tkt-date')?.value,pnr:document.getElementById('tkt-pnr')?.value.trim(),company:document.getElementById('tkt-company')?.value.trim(),airline:document.getElementById('tkt-airline')?.value.trim(),destination:document.getElementById('tkt-destination')?.value.trim(),passenger,system_issue:document.getElementById('tkt-system')?.value.trim(),net_price:document.getElementById('tkt-net')?.value||0,selling_price:document.getElementById('tkt-selling')?.value||0,status:document.getElementById('tkt-status')?.value||'unpaid',notes:document.getElementById('tkt-notes')?.value.trim(),ticket_type:type,client_id:clientId};
-  let r;if(_editTicketId){r=await api('PUT',`/api/tickets/${_editTicketId}`,body);toast('✅ Ticket updated','success');}else{r=await api('POST','/api/tickets',body);toast('✅ Ticket saved','success');}if(r&&r.error){toast(r.error,'error');return;}if(_editTicketId)viewTicket(_editTicketId);else showPage('tickets');}
+async function saveTicket(){const type=document.getElementById('tkt-type')?.value||'individual';const clientId=type==='company'?document.getElementById('tkt-client-id')?.value||null:null;const passenger=document.getElementById('tkt-passenger')?.value.trim()||'';const body={num:document.getElementById('tkt-num')?.value.trim(),date:document.getElementById('tkt-date')?.value,pnr:document.getElementById('tkt-pnr')?.value.trim(),company:document.getElementById('tkt-company')?.value.trim(),airline:document.getElementById('tkt-airline')?.value.trim(),destination:document.getElementById('tkt-destination')?.value.trim(),passenger,system_issue:document.getElementById('tkt-system')?.value.trim(),net_price:document.getElementById('tkt-net')?.value||0,selling_price:document.getElementById('tkt-selling')?.value||0,status:document.getElementById('tkt-status')?.value||'unpaid',notes:document.getElementById('tkt-notes')?.value.trim(),ticket_type:type,client_id:clientId};let r;if(_editTicketId){r=await api('PUT',`/api/tickets/${_editTicketId}`,body);toast('✅ Ticket updated','success');}else{r=await api('POST','/api/tickets',body);toast('✅ Ticket saved','success');}if(r&&r.error){toast(r.error,'error');return;}if(_editTicketId)viewTicket(_editTicketId);else showPage('tickets');}
 async function deleteTicket(id){if(!confirm('Delete this ticket?'))return;await api('DELETE',`/api/tickets/${id}`);toast('Ticket deleted');showPage('tickets');}
 
 /* STATEMENTS */
@@ -255,200 +231,119 @@ async function pageStatements(mc){allClients=await api('GET','/api/clients');con
 <div id="stmt-company"><div class="card"><div class="card-header"><span class="card-title">Company Statement</span></div><div class="filter-bar" style="flex-wrap:wrap;gap:10px"><select class="form-input" id="stmt-client" style="min-width:200px"><option value="">-- Select Company --</option>${allClients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select><input type="date" class="form-input" id="stmt-from" value="${firstDay}" style="width:150px"/><span style="color:#aaa;align-self:center">to</span><input type="date" class="form-input" id="stmt-to" value="${today()}" style="width:150px"/><button class="btn-new" onclick="loadCompanyStmt()"><i class="ti ti-search"></i> Search</button></div></div><div id="stmt-company-result"></div></div>
 <div id="stmt-person" style="display:none"><div class="card"><div class="card-header"><span class="card-title">Individual Statement</span></div><div class="filter-bar" style="flex-wrap:wrap;gap:10px"><input type="text" class="form-input" id="stmt-name" placeholder="Passenger name…" style="min-width:200px"/><input type="date" class="form-input" id="stmt-pfrom" value="${firstDay}" style="width:150px"/><span style="color:#aaa;align-self:center">to</span><input type="date" class="form-input" id="stmt-pto" value="${today()}" style="width:150px"/><button class="btn-new" onclick="loadPersonStmt()"><i class="ti ti-search"></i> Search</button></div></div><div id="stmt-person-result"></div></div>`;}
 function switchStmtTab(tab){document.getElementById('stmt-company').style.display=tab==='company'?'':'none';document.getElementById('stmt-person').style.display=tab==='person'?'':'none';document.getElementById('tab-company').className=tab==='company'?'btn-new':'btn-secondary';document.getElementById('tab-company').style.borderRadius='8px';document.getElementById('tab-person').className=tab==='person'?'btn-new':'btn-secondary';document.getElementById('tab-person').style.borderRadius='8px';}
-async function loadCompanyStmt(){
-  const clientId=document.getElementById('stmt-client')?.value;
-  const from=document.getElementById('stmt-from')?.value;
-  const to=document.getElementById('stmt-to')?.value;
-  if(!clientId){toast('Please select a company','error');return;}
-  const client=allClients.find(c=>c.id==clientId);
-  const invoices=await api('GET','/api/invoices');
-  const clientInvoices=invoices.filter(i=>{
-    const matchClient=i.client_id==clientId||(i.client_name&&client&&i.client_name.toLowerCase()===client.name.toLowerCase());
-    const matchDate=(!from||i.date>=from)&&(!to||i.date<=to);
-    return matchClient&&matchDate;
-  }).sort((a,b)=>a.date.localeCompare(b.date));
-  const rc=document.getElementById('stmt-company-result');
-  if(!rc)return;
-  const totalAmount=clientInvoices.reduce((a,i)=>a+i.total,0);
-  const totalDue=clientInvoices.filter(i=>i.status!=='paid').reduce((a,i)=>a+i.total,0);
-  const fmtNum=(n)=>Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-  const cur=clientInvoices[0]?.currency||settings.invoice_currency||'KWD';
-
-  const rows=clientInvoices.map((i,idx)=>{
-    const isPaid=i.status==='paid'||i.status==='refunded';
-    const isRefunded=i.status==='refunded';
-    const balDue=isPaid?0:i.total;
-    const bg=isRefunded?'#fffbe6':idx%2===0?'#f2f5fa':'#fff';
-    const desc=i.notes?i.notes.split(' ').slice(0,3).join(' ').toUpperCase():'TICKET';
-    const detail=i.notes||'—';
-    return `<tr style="background:${bg}">
-      <td style="padding:5px 8px;border:1px solid #ddd">${fmtDate(i.date)}</td>
-      <td style="padding:5px 8px;border:1px solid #ddd;text-align:center;font-weight:700">${i.num}</td>
-      <td style="padding:5px 8px;border:1px solid #ddd;font-weight:600">${desc}</td>
-      <td style="padding:5px 8px;border:1px solid #ddd">${detail}</td>
-      <td style="padding:5px 8px;border:1px solid #ddd;text-align:right">${fmtNum(i.total)}</td>
-      <td style="padding:5px 8px;border:1px solid #ddd;text-align:right;font-weight:700">${balDue>0?fmtNum(balDue):''}</td>
-      <td style="padding:5px 8px;border:1px solid #ddd;text-align:center;color:#c0392b;font-weight:700;font-style:italic">${fmtDate(i.due_date)}</td>
-      <td style="padding:5px 8px;border:1px solid #ddd;text-align:center;color:#b8860b;font-weight:700">${isRefunded?'✓ REFUND':''}</td>
-      <td style="padding:5px 8px;border:1px solid #ddd;color:${i.status==='paid'?'#1a7a3a':i.status==='refunded'?'#b8860b':'#888'};font-weight:700">${i.status==='paid'?'PAID':i.status==='refunded'?'REFUNDED':''}</td>
-    </tr>`;
-  }).join('');
-
-  rc.innerHTML=`<div class="card" style="margin-top:1rem;padding:0;overflow:hidden">
-  <div style="display:flex;justify-content:space-between;align-items:center;padding:.75rem 1rem;border-bottom:1px solid #eee">
-    <span style="font-weight:700;font-size:14px">📋 ${client?.name||''} — Statement of Account</span>
-    <button class="btn-secondary" onclick="printStmt()"><i class="ti ti-printer"></i> Print / PDF</button>
-  </div>
-  <div id="stmt-printable" style="padding:1.25rem">
-    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:1rem">
-      <tr>
-        <td style="font-size:15px;font-weight:700;color:#1A6FB5">${client?.name||''}</td>
-        <td style="text-align:center;font-size:14px;font-weight:700">CREDIT ACCOUNT</td>
-        <td style="text-align:right">
-          <span style="font-size:12px;font-weight:600">Total Amount Payable</span><br>
-          <span style="background:#FFD700;padding:4px 14px;font-size:16px;font-weight:700;display:inline-block;margin-top:4px">${fmtNum(totalDue)}</span>
-        </td>
-      </tr>
-    </table>
-    <table style="width:100%;border-collapse:collapse;font-size:11.5px">
-      <thead>
-        <tr style="background:#8fa8c8;color:#fff">
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Invoice Date</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:center">Invoice Number</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Description</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Detail</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:right">Total Invoice Amount</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:right">Balance Due</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:center">Due Date</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:center">Refund</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${clientInvoices.length===0?`<tr><td colspan="9" style="text-align:center;padding:2rem;color:#aaa;border:1px solid #ddd">No invoices found for this period</td></tr>`:rows}
-      </tbody>
-      <tfoot>
-        <tr style="background:#f0f0f0">
-          <td colspan="4" style="padding:7px 8px;border:1px solid #ddd;font-weight:700">Total Amount Payable</td>
-          <td style="padding:7px 8px;border:1px solid #ddd;text-align:right;font-weight:700">${fmtNum(totalAmount)}</td>
-          <td style="padding:7px 8px;border:1px solid #ddd;text-align:right;font-weight:700;color:#c0392b">${fmtNum(totalDue)}</td>
-          <td colspan="3" style="border:1px solid #ddd"></td>
-        </tr>
-      </tfoot>
-    </table>
-  </div>
-</div>`;
-}
+async function loadCompanyStmt(){const clientId=document.getElementById('stmt-client')?.value;const from=document.getElementById('stmt-from')?.value;const to=document.getElementById('stmt-to')?.value;if(!clientId){toast('Please select a company','error');return;}const client=allClients.find(c=>c.id==clientId);const invoices=await api('GET','/api/invoices');const clientInvoices=invoices.filter(i=>{const matchClient=i.client_id==clientId||(i.client_name&&client&&i.client_name.toLowerCase()===client.name.toLowerCase());const matchDate=(!from||i.date>=from)&&(!to||i.date<=to);return matchClient&&matchDate;}).sort((a,b)=>a.date.localeCompare(b.date));const rc=document.getElementById('stmt-company-result');if(!rc)return;const totalAmount=clientInvoices.reduce((a,i)=>a+i.total,0);const totalDue=clientInvoices.filter(i=>i.status!=='paid').reduce((a,i)=>a+i.total,0);const fmtNum=(n)=>Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});const rows=clientInvoices.map((i,idx)=>{const isPaid=i.status==='paid'||i.status==='refunded';const isRefunded=i.status==='refunded';const balDue=isPaid?0:i.total;const bg=isRefunded?'#fffbe6':idx%2===0?'#f2f5fa':'#fff';const desc=i.notes?i.notes.split(' ').slice(0,3).join(' ').toUpperCase():'TICKET';const detail=i.notes||'—';return`<tr style="background:${bg}"><td style="padding:5px 8px;border:1px solid #ddd">${fmtDate(i.date)}</td><td style="padding:5px 8px;border:1px solid #ddd;text-align:center;font-weight:700">${i.num}</td><td style="padding:5px 8px;border:1px solid #ddd;font-weight:600">${desc}</td><td style="padding:5px 8px;border:1px solid #ddd">${detail}</td><td style="padding:5px 8px;border:1px solid #ddd;text-align:right">${fmtNum(i.total)}</td><td style="padding:5px 8px;border:1px solid #ddd;text-align:right;font-weight:700">${balDue>0?fmtNum(balDue):''}</td><td style="padding:5px 8px;border:1px solid #ddd;text-align:center;color:#c0392b;font-weight:700;font-style:italic">${fmtDate(i.due_date)}</td><td style="padding:5px 8px;border:1px solid #ddd;text-align:center;color:#b8860b;font-weight:700">${isRefunded?'✓ REFUND':''}</td><td style="padding:5px 8px;border:1px solid #ddd;color:${i.status==='paid'?'#1a7a3a':i.status==='refunded'?'#b8860b':'#888'};font-weight:700">${i.status==='paid'?'PAID':i.status==='refunded'?'REFUNDED':''}</td></tr>`;}).join('');rc.innerHTML=`<div class="card" style="margin-top:1rem;padding:0;overflow:hidden"><div style="display:flex;justify-content:space-between;align-items:center;padding:.75rem 1rem;border-bottom:1px solid #eee"><span style="font-weight:700;font-size:14px">📋 ${client?.name||''} — Statement of Account</span><button class="btn-secondary" onclick="printStmt()"><i class="ti ti-printer"></i> Print / PDF</button></div><div id="stmt-printable" style="padding:1.25rem"><table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:1rem"><tr><td style="font-size:15px;font-weight:700;color:#1A6FB5">${client?.name||''}</td><td style="text-align:center;font-size:14px;font-weight:700">CREDIT ACCOUNT</td><td style="text-align:right"><span style="font-size:12px;font-weight:600">Total Amount Payable</span><br><span style="background:#FFD700;padding:4px 14px;font-size:16px;font-weight:700;display:inline-block;margin-top:4px">${fmtNum(totalDue)}</span></td></tr></table><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="background:#8fa8c8;color:#fff"><th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Invoice Date</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:center">Invoice Number</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Description</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Detail</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:right">Total Invoice Amount</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:right">Balance Due</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:center">Due Date</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:center">Refund</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Status</th></tr></thead><tbody>${clientInvoices.length===0?`<tr><td colspan="9" style="text-align:center;padding:2rem;color:#aaa;border:1px solid #ddd">No invoices found for this period</td></tr>`:rows}</tbody><tfoot><tr style="background:#f0f0f0"><td colspan="4" style="padding:7px 8px;border:1px solid #ddd;font-weight:700">Total Amount Payable</td><td style="padding:7px 8px;border:1px solid #ddd;text-align:right;font-weight:700">${fmtNum(totalAmount)}</td><td style="padding:7px 8px;border:1px solid #ddd;text-align:right;font-weight:700;color:#c0392b">${fmtNum(totalDue)}</td><td colspan="3" style="border:1px solid #ddd"></td></tr></tfoot></table></div></div>`;}
 function printStmt(){
   const content=document.getElementById('stmt-printable')?.innerHTML;
   if(!content)return;
+  const s=settings;
+  const logoHtml=s.company_logo?`<img src="${s.company_logo}" style="height:60px;object-fit:contain" alt="Logo"/>`:`<div style="font-size:18px;font-weight:900;color:#0a3258">✈ WHITE SKY</div>`;
   const win=window.open('','_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement of Account</title><style>
-    body{font-family:Arial,sans-serif;padding:20px;font-size:11.5px;color:#222}
-    table{width:100%;border-collapse:collapse}
-    th{background:#8fa8c8;color:#fff;padding:7px 8px;border:1px solid #aaa;text-align:left}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;font-size:11px;color:#222;background:#fff}
+    .page{padding:20px 25px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:3px solid #0a3258;margin-bottom:16px}
+    .header-left{display:flex;align-items:center;gap:14px}
+    .company-info{font-size:10px;color:#555;line-height:1.6}
+    .company-name{font-size:13px;font-weight:700;color:#0a3258;margin-bottom:2px}
+    .stmt-title{text-align:right}
+    .stmt-title h1{font-size:22px;font-weight:900;color:#0a3258;letter-spacing:.04em}
+    .stmt-title p{font-size:10px;color:#888;margin-top:2px}
+    .client-block{display:flex;justify-content:space-between;align-items:flex-start;background:#f0f4fa;border-radius:6px;padding:10px 14px;margin-bottom:14px}
+    .client-name{font-size:15px;font-weight:700;color:#1A6FB5}
+    .credit-label{font-size:11px;font-weight:700;color:#0a3258;text-align:center}
+    .total-block{text-align:right}
+    .total-label{font-size:10px;color:#666;font-weight:600}
+    .total-amount{background:#FFD700;padding:4px 14px;font-size:16px;font-weight:700;display:inline-block;margin-top:3px;border-radius:3px}
+    table{width:100%;border-collapse:collapse;font-size:10.5px}
+    thead tr{background:#0a3258;color:#fff}
+    th{padding:7px 8px;border:1px solid #0a3258;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em}
     td{padding:5px 8px;border:1px solid #ddd}
-    tr:nth-child(even) td{background:#f2f5fa}
-    tfoot td{background:#f0f0f0;font-weight:700}
-    @media print{body{padding:0}button{display:none}}
-  </style></head><body>${content}<script>window.onload=()=>window.print()<\/script></body></html>`);
+    tbody tr:nth-child(even) td{background:#f5f8fd}
+    tbody tr:hover td{background:#eaf1fb}
+    .paid-row td{color:#1a7a3a}
+    .refund-row td{background:#fffbe6!important}
+    tfoot tr td{background:#e8eef5;font-weight:700;border:1px solid #bbb}
+    .status-paid{color:#1a7a3a;font-weight:700}
+    .status-refunded{color:#b8860b;font-weight:700}
+    .status-pending{color:#888}
+    .footer{margin-top:20px;padding-top:10px;border-top:1px solid #ddd;display:flex;justify-content:space-between;font-size:9.5px;color:#aaa}
+    @media print{body{padding:0}.page{padding:10px 15px}button{display:none!important}}
+  </style></head><body><div class="page">
+  <div class="header">
+    <div class="header-left">
+      ${logoHtml}
+      <div class="company-info">
+        <div class="company-name">${s.company_name||'WHITE SKY TRAVEL AGENCY'}</div>
+        <div>${s.company_address||''}</div>
+        <div>P: ${s.company_phone_p||''} | M: ${s.company_phone_m||''}</div>
+        <div>${s.company_email||''}</div>
+      </div>
+    </div>
+    <div class="stmt-title">
+      <h1>STATEMENT</h1>
+      <p>OF ACCOUNT</p>
+      <p style="margin-top:6px;color:#555">Date: ${new Date().toLocaleDateString('en-GB')}</p>
+    </div>
+  </div>
+  ${content}
+  <div class="footer">
+    <span>${s.company_name||'WHITE SKY TRAVEL AGENCY'} — ${s.company_email||''}</span>
+    <span>Generated on ${new Date().toLocaleString('en-GB')}</span>
+  </div>
+</div><script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
 }
-async function loadPersonStmt(){
-  const name=document.getElementById('stmt-name')?.value.trim();
-  const from=document.getElementById('stmt-pfrom')?.value;
-  const to=document.getElementById('stmt-pto')?.value;
-  if(!name){toast('Please enter a name','error');return;}
-  const [tickets,invoices]=await Promise.all([api('GET','/api/tickets'),api('GET','/api/invoices')]);
-  const filteredTickets=tickets.filter(t=>{
-    const matchName=t.passenger&&t.passenger.toLowerCase().includes(name.toLowerCase());
-    const matchDate=(!from||t.date>=from)&&(!to||t.date<=to);
-    return matchName&&matchDate;
-  });
-  const filteredInvoices=invoices.filter(i=>{
-    const matchName=i.client_name&&i.client_name.toLowerCase().includes(name.toLowerCase());
-    const matchDate=(!from||i.date>=from)&&(!to||i.date<=to);
-    return matchName&&matchDate;
-  });
-  const rc=document.getElementById('stmt-person-result');
-  if(!rc)return;
-  const fmtNum=(n)=>Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-  const totalAmount=filteredInvoices.reduce((a,i)=>a+i.total,0)+filteredTickets.reduce((a,t)=>a+t.selling_price,0);
-const totalDue=filteredInvoices.filter(i=>i.status!=='paid'&&i.status!=='refunded').reduce((a,i)=>a+i.total,0)+filteredTickets.filter(t=>t.status!=='paid'&&t.status!=='refunded').reduce((a,t)=>a+t.selling_price,0);
+async function loadPersonStmt(){const name=document.getElementById('stmt-name')?.value.trim();const from=document.getElementById('stmt-pfrom')?.value;const to=document.getElementById('stmt-pto')?.value;if(!name){toast('Please enter a name','error');return;}const[tickets,invoices]=await Promise.all([api('GET','/api/tickets'),api('GET','/api/invoices')]);const filteredTickets=tickets.filter(t=>{const matchName=t.passenger&&t.passenger.toLowerCase().includes(name.toLowerCase());const matchDate=(!from||t.date>=from)&&(!to||t.date<=to);return matchName&&matchDate;});const filteredInvoices=invoices.filter(i=>{const matchName=i.client_name&&i.client_name.toLowerCase().includes(name.toLowerCase());const matchDate=(!from||i.date>=from)&&(!to||i.date<=to);return matchName&&matchDate;});const rc=document.getElementById('stmt-person-result');if(!rc)return;const fmtNum=(n)=>Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});const totalAmount=filteredInvoices.reduce((a,i)=>a+i.total,0)+filteredTickets.reduce((a,t)=>a+t.selling_price,0);const totalDue=filteredInvoices.filter(i=>i.status!=='paid'&&i.status!=='refunded').reduce((a,i)=>a+i.total,0)+filteredTickets.filter(t=>t.status!=='paid'&&t.status!=='refunded').reduce((a,t)=>a+t.selling_price,0);const allRows=[...filteredInvoices.map(i=>({id:i.id,type:'invoice',num:i.num,date:i.date,desc:i.notes?i.notes.split(' ').slice(0,3).join(' ').toUpperCase():'TICKET',detail:i.notes||'—',total:i.total,due:(i.status==='paid'||i.status==='refunded')?0:i.total,due_date:i.due_date,status:i.status,currency:i.currency})),...filteredTickets.map(t=>({id:t.id,type:'ticket',num:t.num,date:t.date,desc:'TICKET',detail:t.destination||'—',total:t.selling_price,due:(t.status==='paid'||t.status==='refunded')?0:t.selling_price,due_date:'—',status:t.status,currency:''}))].sort((a,b)=>a.date.localeCompare(b.date));const rows=allRows.map((r,idx)=>`<tr style="background:${idx%2===0?'#f2f5fa':'#fff'}"><td style="padding:5px 8px;border:1px solid #ddd">${fmtDate(r.date)}</td><td style="padding:5px 8px;border:1px solid #ddd;text-align:center;font-weight:700;color:#1A6FB5;cursor:pointer" onclick="${r.type==='invoice'?`viewInvoice(${r.id})`:`viewTicket(${r.id})`}">${r.num}</td><td style="padding:5px 8px;border:1px solid #ddd;font-weight:600">${r.desc}</td><td style="padding:5px 8px;border:1px solid #ddd">${r.detail}</td><td style="padding:5px 8px;border:1px solid #ddd;text-align:right">${fmtNum(r.total)}</td><td style="padding:5px 8px;border:1px solid #ddd;text-align:right;font-weight:700">${r.due>0?fmtNum(r.due):''}</td><td style="padding:5px 8px;border:1px solid #ddd;text-align:center;color:#c0392b;font-weight:700;font-style:italic">${r.due_date&&r.due_date!=='—'?fmtDate(r.due_date):'—'}</td><td style="padding:5px 8px;border:1px solid #ddd;color:${r.status==='paid'?'#1a7a3a':'#888'};font-weight:${r.status==='paid'?'700':'400'}">${r.status==='paid'?'PAID':r.status==='refunded'?'REFUNDED':''}</td></tr>`).join('');rc.innerHTML=`<div class="card" style="margin-top:1rem;padding:0;overflow:hidden"><div style="display:flex;justify-content:space-between;align-items:center;padding:.75rem 1rem;border-bottom:1px solid #eee"><span style="font-weight:700;font-size:14px">👤 Statement — ${name}</span><button class="btn-secondary" onclick="printPersonStmt()"><i class="ti ti-printer"></i> Print / PDF</button></div><div id="person-stmt-printable" style="padding:1.25rem"><table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:1rem"><tr><td style="font-size:15px;font-weight:700;color:#1A6FB5">${name}</td><td style="text-align:center;font-size:14px;font-weight:700">CREDIT ACCOUNT</td><td style="text-align:right"><span style="font-size:12px;font-weight:600">Total Amount Payable</span><br><span style="background:#FFD700;padding:4px 14px;font-size:16px;font-weight:700;display:inline-block;margin-top:4px">${fmtNum(totalDue)}</span></td></tr></table><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="background:#8fa8c8;color:#fff"><th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Invoice Date</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:center">Invoice Number</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Description</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Detail</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:right">Total Invoice Amount</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:right">Balance Due</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:center">Due Date</th><th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Status</th></tr></thead><tbody>${allRows.length===0?`<tr><td colspan="8" style="text-align:center;padding:2rem;color:#aaa;border:1px solid #ddd">No results found for "${name}"</td></tr>`:rows}</tbody><tfoot><tr style="background:#f0f0f0"><td colspan="4" style="padding:7px 8px;border:1px solid #ddd;font-weight:700">Total Amount Payable</td><td style="padding:7px 8px;border:1px solid #ddd;text-align:right;font-weight:700">${fmtNum(totalAmount)}</td><td style="padding:7px 8px;border:1px solid #ddd;text-align:right;font-weight:700;color:#c0392b">${fmtNum(totalDue)}</td><td colspan="2" style="border:1px solid #ddd"></td></tr></tfoot></table></div></div>`;}
 
-  const allRows=[
-    ...filteredInvoices.map(i=>({
-      id:i.id, type:'invoice', num:i.num, date:i.date,
-      desc:i.notes?i.notes.split(' ').slice(0,3).join(' ').toUpperCase():'TICKET',
-      detail:i.notes||'—', total:i.total, due:(i.status==='paid'||i.status==='refunded')?0:i.total,
-      due_date:i.due_date, status:i.status, currency:i.currency
-    })),
-    ...filteredTickets.map(t=>({
-      id:t.id, type:'ticket', num:t.num, date:t.date,
-      desc:'TICKET', detail:t.destination||'—', total:t.selling_price,
-      due:(t.status==='paid'||t.status==='refunded')?0:t.selling_price,due_date:'—', status:t.status, currency:''
-    }))
-  ].sort((a,b)=>a.date.localeCompare(b.date));
-
-  const rows=allRows.map((r,idx)=>`<tr style="background:${idx%2===0?'#f2f5fa':'#fff'}">
-    <td style="padding:5px 8px;border:1px solid #ddd">${fmtDate(r.date)}</td>
-    <td style="padding:5px 8px;border:1px solid #ddd;text-align:center;font-weight:700;color:#1A6FB5;cursor:pointer" onclick="${r.type==='invoice'?`viewInvoice(${r.id})`:`viewTicket(${r.id})`}">${r.num}</td>
-    <td style="padding:5px 8px;border:1px solid #ddd;font-weight:600">${r.desc}</td>
-    <td style="padding:5px 8px;border:1px solid #ddd">${r.detail}</td>
-    <td style="padding:5px 8px;border:1px solid #ddd;text-align:right">${fmtNum(r.total)}</td>
-    <td style="padding:5px 8px;border:1px solid #ddd;text-align:right;font-weight:700">${r.due>0?fmtNum(r.due):''}</td>
-    <td style="padding:5px 8px;border:1px solid #ddd;text-align:center;color:#c0392b;font-weight:700;font-style:italic">${r.due_date&&r.due_date!=='—'?fmtDate(r.due_date):'—'}</td>
-    <td style="padding:5px 8px;border:1px solid #ddd;color:${r.status==='paid'?'#1a7a3a':'#888'};font-weight:${r.status==='paid'?'700':'400'}">${r.status==='paid'?'PAID':r.status==='refunded'?'REFUNDED':''}</td>
-  </tr>`).join('');
-
-  rc.innerHTML=`<div class="card" style="margin-top:1rem;padding:0;overflow:hidden">
-  <div style="display:flex;justify-content:space-between;align-items:center;padding:.75rem 1rem;border-bottom:1px solid #eee">
-    <span style="font-weight:700;font-size:14px">👤 Statement — ${name}</span>
-    <button class="btn-secondary" onclick="printPersonStmt()"><i class="ti ti-printer"></i> Print / PDF</button>
-  </div>
-  <div id="person-stmt-printable" style="padding:1.25rem">
-    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:1rem">
-      <tr>
-        <td style="font-size:15px;font-weight:700;color:#1A6FB5">${name}</td>
-        <td style="text-align:center;font-size:14px;font-weight:700">CREDIT ACCOUNT</td>
-        <td style="text-align:right">
-          <span style="font-size:12px;font-weight:600">Total Amount Payable</span><br>
-          <span style="background:#FFD700;padding:4px 14px;font-size:16px;font-weight:700;display:inline-block;margin-top:4px">${fmtNum(totalDue)}</span>
-        </td>
-      </tr>
-    </table>
-    <table style="width:100%;border-collapse:collapse;font-size:11.5px">
-      <thead>
-        <tr style="background:#8fa8c8;color:#fff">
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Invoice Date</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:center">Invoice Number</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Description</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Detail</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:right">Total Invoice Amount</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:right">Balance Due</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:center">Due Date</th>
-          <th style="padding:7px 8px;border:1px solid #aaa;text-align:left">Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${allRows.length===0?`<tr><td colspan="8" style="text-align:center;padding:2rem;color:#aaa;border:1px solid #ddd">No results found for "${name}"</td></tr>`:rows}
-      </tbody>
-      <tfoot>
-        <tr style="background:#f0f0f0">
-          <td colspan="4" style="padding:7px 8px;border:1px solid #ddd;font-weight:700">Total Amount Payable</td>
-          <td style="padding:7px 8px;border:1px solid #ddd;text-align:right;font-weight:700">${fmtNum(totalAmount)}</td>
-          <td style="padding:7px 8px;border:1px solid #ddd;text-align:right;font-weight:700;color:#c0392b">${fmtNum(totalDue)}</td>
-          <td colspan="2" style="border:1px solid #ddd"></td>
-        </tr>
-      </tfoot>
-    </table>
-  </div>
-</div>`;}
 function printPersonStmt(){
   const content=document.getElementById('person-stmt-printable')?.innerHTML;
   if(!content)return;
+  const s=settings;
+  const logoHtml=s.company_logo?`<img src="${s.company_logo}" style="height:60px;object-fit:contain" alt="Logo"/>`:`<div style="font-size:18px;font-weight:900;color:#0a3258">✈ WHITE SKY</div>`;
   const win=window.open('','_blank');
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Individual Statement</title><style>body{font-family:Arial,sans-serif;padding:20px;font-size:11.5px;color:#222}table{width:100%;border-collapse:collapse}th{background:#8fa8c8;color:#fff;padding:7px 8px;border:1px solid #aaa;text-align:left}td{padding:5px 8px;border:1px solid #ddd}tr:nth-child(even) td{background:#f2f5fa}tfoot td{background:#f0f0f0;font-weight:700}@media print{body{padding:0}button{display:none}}</style></head><body>${content}<script>window.onload=()=>window.print()<\/script></body></html>`);
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Individual Statement</title><style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;font-size:11px;color:#222;background:#fff}
+    .page{padding:20px 25px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:3px solid #0a3258;margin-bottom:16px}
+    .header-left{display:flex;align-items:center;gap:14px}
+    .company-info{font-size:10px;color:#555;line-height:1.6}
+    .company-name{font-size:13px;font-weight:700;color:#0a3258;margin-bottom:2px}
+    .stmt-title{text-align:right}
+    .stmt-title h1{font-size:22px;font-weight:900;color:#0a3258;letter-spacing:.04em}
+    .stmt-title p{font-size:10px;color:#888;margin-top:2px}
+    table{width:100%;border-collapse:collapse;font-size:10.5px}
+    thead tr{background:#0a3258;color:#fff}
+    th{padding:7px 8px;border:1px solid #0a3258;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em}
+    td{padding:5px 8px;border:1px solid #ddd}
+    tbody tr:nth-child(even) td{background:#f5f8fd}
+    tfoot tr td{background:#e8eef5;font-weight:700;border:1px solid #bbb}
+    .footer{margin-top:20px;padding-top:10px;border-top:1px solid #ddd;display:flex;justify-content:space-between;font-size:9.5px;color:#aaa}
+    @media print{body{padding:0}.page{padding:10px 15px}button{display:none!important}}
+  </style></head><body><div class="page">
+  <div class="header">
+    <div class="header-left">
+      ${logoHtml}
+      <div class="company-info">
+        <div class="company-name">${s.company_name||'WHITE SKY TRAVEL AGENCY'}</div>
+        <div>${s.company_address||''}</div>
+        <div>P: ${s.company_phone_p||''} | M: ${s.company_phone_m||''}</div>
+        <div>${s.company_email||''}</div>
+      </div>
+    </div>
+    <div class="stmt-title">
+      <h1>STATEMENT</h1>
+      <p>OF ACCOUNT</p>
+      <p style="margin-top:6px;color:#555">Date: ${new Date().toLocaleDateString('en-GB')}</p>
+    </div>
+  </div>
+  ${content}
+  <div class="footer">
+    <span>${s.company_name||'WHITE SKY TRAVEL AGENCY'} — ${s.company_email||''}</span>
+    <span>Generated on ${new Date().toLocaleString('en-GB')}</span>
+  </div>
+</div><script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
 }
 
@@ -470,21 +365,18 @@ async function pageSettings(mc){const isP=currentUser.role==='patron';settings=a
     <input type="file" id="logo-file" accept="image/*" ${!isP?'disabled':''} onchange="uploadLogo(this)"/>
   </div>
   ${settings.company_logo?`<button class="btn-danger" style="margin-top:8px;font-size:12px;padding:5px 10px" onclick="removeLogo()"><i class="ti ti-trash" style="vertical-align:-2px;margin-right:4px"></i>Remove logo</button>`:''}
-
   <div class="settings-label" style="margin-top:1.5rem">Signature Image</div>
   <div class="logo-upload-area" onclick="document.getElementById('sig-file').click()">
     ${settings.company_signature?`<img src="${settings.company_signature}" style="height:80px" alt="Signature"/>`:`<div class="logo-placeholder"><i class="ti ti-writing"></i>Click to upload signature<br><span style="font-size:11px;color:#ccc">PNG, JPG — appears on invoices</span></div>`}
     <input type="file" id="sig-file" accept="image/*" ${!isP?'disabled':''} onchange="uploadSignature(this)"/>
   </div>
   ${settings.company_signature?`<button class="btn-danger" style="margin-top:8px;font-size:12px;padding:5px 10px" onclick="removeSignature()"><i class="ti ti-trash" style="vertical-align:-2px;margin-right:4px"></i>Remove signature</button>`:''}
-
   <div class="settings-label" style="margin-top:1.5rem">Stamp Image</div>
   <div class="logo-upload-area" onclick="document.getElementById('stamp-file').click()">
     ${settings.company_stamp?`<img src="${settings.company_stamp}" style="height:80px" alt="Stamp"/>`:`<div class="logo-placeholder"><i class="ti ti-circle-check"></i>Click to upload stamp<br><span style="font-size:11px;color:#ccc">PNG, JPG — appears on invoices</span></div>`}
     <input type="file" id="stamp-file" accept="image/*" ${!isP?'disabled':''} onchange="uploadStamp(this)"/>
   </div>
   ${settings.company_stamp?`<button class="btn-danger" style="margin-top:8px;font-size:12px;padding:5px 10px" onclick="removeStamp()"><i class="ti ti-trash" style="vertical-align:-2px;margin-right:4px"></i>Remove stamp</button>`:''}
-
   <div class="settings-label" style="margin-top:1.5rem">Agency Information</div>
   <div class="form-grid2" style="gap:14px">
     <div class="form-group full"><label class="form-label">Name</label><input class="form-input" id="s-name" value="${settings.company_name||''}" ${!isP?'disabled':''}/></div>
@@ -515,6 +407,223 @@ async function removeStamp(){await api('POST','/api/settings',{company_stamp:''}
 function openUserModal(id){const isEdit=!!id;document.getElementById('modal-user-title').textContent=isEdit?'Edit User':'New User';document.getElementById('edit-user-id').value=id||'';document.getElementById('btn-save-user').textContent=isEdit?'Update':'Create';document.getElementById('u-pass-hint').style.display=isEdit?'':'none';document.getElementById('u-display').value='';document.getElementById('u-username').value='';document.getElementById('u-password').value='';document.getElementById('u-role').value='employe';document.getElementById('u-username').disabled=!!isEdit;openModal('modal-user');}
 document.getElementById('btn-save-user').addEventListener('click',async()=>{const id=document.getElementById('edit-user-id').value;const body={display_name:document.getElementById('u-display').value.trim(),username:document.getElementById('u-username').value.trim(),password:document.getElementById('u-password').value,role:document.getElementById('u-role').value};if(!id&&(!body.username||!body.password)){toast('All fields are required','error');return;}const r=id?await api('PUT',`/api/users/${id}`,body):await api('POST','/api/users',body);if(r&&r.error){toast(r.error,'error');return;}closeModal('modal-user');toast('✅ User '+(id?'updated':'created'),'success');showPage('settings');});
 async function deleteUser(id){if(!confirm('Delete this user?'))return;await api('DELETE',`/api/users/${id}`);toast('User deleted');showPage('settings');}
+
+
+
+
+
+
+/* PDF IMPORT */
+async function openPdfImport(){
+  // Load clients first
+  if(!allClients.length) allClients = await api('GET','/api/clients');
+  document.getElementById('pdf-preview').style.display='none';
+  document.getElementById('pdf-error').style.display='none';
+  document.getElementById('btn-save-pdf').style.display='none';
+  document.getElementById('pdf-file-input').value='';
+  // Populate client dropdown
+  const sel = document.getElementById('pdf-client-select');
+  if(sel) sel.innerHTML = '<option value="">-- Select client (optional) --</option>' + allClients.map(c=>`<option value="${c.id}" data-name="${c.name}" data-addr="${c.address||''}" data-phone="${c.phone||''}" data-fax="${c.fax||''}">${c.name}</option>`).join('');
+  openModal('modal-import-pdf');
+}
+
+function fillPdfClient(sel){
+  const o = sel.querySelector(`option[value="${sel.value}"]`);
+  if(!o||!sel.value) return;
+  document.getElementById('pdf-client').value = o.dataset.name||'';
+}
+
+async function handlePdfImport(input){
+  const file=input.files[0];
+  if(!file)return;
+  const errEl=document.getElementById('pdf-error');
+  errEl.style.display='none';
+  try{
+    const arrayBuffer=await file.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+    let text='';
+    for(let i=1;i<=pdf.numPages;i++){
+      const page=await pdf.getPage(i);
+      const content=await page.getTextContent();
+      text+=content.items.map(s=>s.str).join(' ')+'\n';
+    }
+    parsePdfText(text);
+  }catch(e){
+    errEl.textContent='Error reading PDF: '+e.message;
+    errEl.style.display='block';
+  }
+}
+
+function parsePdfText(text) {
+  const errEl = document.getElementById('pdf-error');
+  errEl.style.display = 'none';
+  errEl.style.cssText = '';
+
+  try {
+    const tokens = text.split(/  +/).map(t => t.replace(/ /g, '').trim()).filter(Boolean);
+
+    // Invoice number
+    const numIdx = tokens.indexOf('#:');
+    const num = numIdx !== -1 ? 'FAC-' + tokens[numIdx + 1] : '';
+
+    // Date
+    const dateIdx = tokens.findIndex(t => t === 'date:');
+    let date = '';
+    if (dateIdx !== -1) {
+      const raw = tokens[dateIdx + 1];
+      const parts = raw.split('/');
+      if (parts.length === 3) date = parts[2] + '-' + parts[1] + '-' + parts[0].padStart(2, '0');
+    }
+
+    // Client
+    const toIdx = tokens.findIndex(t => t === 'to:');
+    const clientFromPdf = toIdx !== -1 ? tokens[toIdx + 1] : '';
+
+    // Currency detection
+    const currencyMap = { 'KWD':'KWD', 'USD':'USD', 'EUR':'EUR', 'LBP':'LBP', 'AED':'AED', 'SAR':'SAR' };
+    let currency = 'KWD';
+    for(const cur of Object.keys(currencyMap)){
+      if(tokens.includes(cur)){ currency = cur; break; }
+    }
+
+    // Total
+    let total = '0';
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      if (tokens[i] === 'TOTAL') {
+        const next = tokens[i+1]||'';
+        const next2 = tokens[i+2]||'';
+        if(next2 === currency || next2.includes(currency)){ total = next.replace(currency,''); break; }
+        if(/^\d/.test(next)){ total = next.replace(currency,''); break; }
+      }
+    }
+
+    // Rows
+    const priceHeaderIdx = tokens.indexOf('Price');
+    const subtotalIdx = tokens.findIndex((t, i) => i > priceHeaderIdx && t === 'Invoice' && tokens[i+1] === 'Subtotal');
+    const rowTokens = tokens.slice(priceHeaderIdx + 1, subtotalIdx !== -1 ? subtotalIdx : undefined);
+
+    const rows = [];
+    let i = 0;
+    while (i < rowTokens.length) {
+      const pnr = rowTokens[i]; i++;
+      if (!pnr || pnr === currency || pnr === 'TOTAL') break;
+      const destination = rowTokens[i] || ''; i++;
+
+      let passengerParts = [];
+      while (i < rowTokens.length) {
+        const t = rowTokens[i];
+        if (!t || t === currency || new RegExp('^\\d+'+currency+'$').test(t)) break;
+        if (t.match(/^\d{1,2}[\/]\d{2}/)) break;
+        const next = rowTokens[i + 1];
+        if (next && (next.match(/^\d{1,2}[\/]\d{2}/) || next === currency || new RegExp('^\\d+'+currency+'$').test(next))) {
+          if (t === 'hotel') { i++; break; }
+          passengerParts.push(t); i++;
+          break;
+        }
+        passengerParts.push(t); i++;
+      }
+
+      const airline = passengerParts.pop() || '';
+      const passenger = passengerParts.join(' ');
+      const travel_date = rowTokens[i] || ''; i++;
+
+      let priceRaw = rowTokens[i] || '0'; i++;
+      const priceClean = priceRaw.replace(currency,'');
+      const price = parseFloat(priceClean) || 0;
+      if (rowTokens[i] === currency) i++;
+
+      rows.push({ pnr, destination, passenger, airline, airlineRef: airline, travel_date, price });
+    }
+
+    // Fill form
+    document.getElementById('pdf-num').value = num;
+    document.getElementById('pdf-date').value = date;
+    document.getElementById('pdf-currency').value = currency;
+    document.getElementById('pdf-total').value = total;
+
+    // Client: use dropdown selection if set, otherwise from PDF
+    const selClient = document.getElementById('pdf-client-select');
+    const selVal = selClient ? selClient.value : '';
+    if(!selVal) document.getElementById('pdf-client').value = clientFromPdf;
+
+    if (rows.length > 0) {
+      document.getElementById('pdf-pnr').value = rows[0].pnr;
+      document.getElementById('pdf-destination').value = rows[0].destination;
+      document.getElementById('pdf-passenger').value = rows[0].passenger;
+      document.getElementById('pdf-airline').value = rows[0].airline;
+      document.getElementById('pdf-travel-date').value = rows[0].travel_date;
+    }
+
+    window._pdfImportRows = rows;
+    document.getElementById('pdf-preview').style.display = 'block';
+    document.getElementById('btn-save-pdf').style.display = 'inline-flex';
+
+    if (!num && !clientFromPdf) {
+      errEl.textContent = 'Could not extract data. Please fill in manually.';
+      errEl.style.display = 'block';
+    } else if (rows.length > 1) {
+      errEl.style.cssText = 'display:block;color:#1a7a3a;background:#e6f9ee;border:1px solid #a3d9b1;padding:10px;border-radius:7px;font-size:13px;margin-top:10px';
+      errEl.textContent = '✅ ' + rows.length + ' rows detected. All will be imported.';
+    }
+
+  } catch(e) {
+    errEl.textContent = 'Parsing error: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+async function savePdfInvoice() {
+  const num    = document.getElementById('pdf-num').value.trim();
+  const date   = document.getElementById('pdf-date').value;
+  const status = document.getElementById('pdf-status').value;
+  const currency = document.getElementById('pdf-currency').value || 'KWD';
+
+  // Client: from dropdown or manual field
+  const selClient = document.getElementById('pdf-client-select');
+  const clientId = selClient ? selClient.value || null : null;
+  const clientOption = selClient ? selClient.querySelector(`option[value="${clientId}"]`) : null;
+  const clientName = document.getElementById('pdf-client').value.trim();
+  const clientAddr = clientOption ? clientOption.dataset.addr||'' : '';
+  const clientPhone = clientOption ? clientOption.dataset.phone||'' : '';
+  const clientFax = clientOption ? clientOption.dataset.fax||'' : '';
+
+  if (!num || !clientName) { toast('Invoice # and client are required', 'error'); return; }
+
+  const dueDate = date ? addDays(date, 7) : '';
+
+  const rows = (window._pdfImportRows && window._pdfImportRows.length > 0)
+    ? window._pdfImportRows
+    : [{
+        pnr:         document.getElementById('pdf-pnr').value.trim(),
+        destination: document.getElementById('pdf-destination').value.trim(),
+        passenger:   document.getElementById('pdf-passenger').value.trim(),
+        airline:     document.getElementById('pdf-airline').value.trim(),
+        airlineRef:  document.getElementById('pdf-airline').value.trim(),
+        travel_date: document.getElementById('pdf-travel-date').value.trim(),
+        price:       parseFloat(document.getElementById('pdf-total').value) || 0
+      }];
+
+  const subtotal = rows.reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
+
+  const body = {
+    num, client_id: clientId, client_name: clientName,
+    client_address: clientAddr, client_phone: clientPhone, client_fax: clientFax,
+    status, date, due_date: dueDate, due_days: 7,
+    subtotal, tax: 0, deposit: 0, total: subtotal,
+    currency, notes: '', rows
+  };
+
+  const r = await api('POST', '/api/invoices', body);
+  if (r && r.error) { toast(r.error, 'error'); return; }
+  window._pdfImportRows = null;
+  toast('✅ Invoice imported!', 'success');
+  closeModal('modal-import-pdf');
+  showPage('invoices');
+}
+
+
+
+
 
 /* KEYBOARD */
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.modal-bg:not(.hidden)').forEach(m=>m.classList.add('hidden'));});
