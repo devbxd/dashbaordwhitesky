@@ -18,6 +18,11 @@ function toParams(sql) {
   return sql.replace(/\?/g, () => `$${++i}`);
 }
 
+function cleanDate(d) {
+  if (!d) return null;
+  return String(d).split('T')[0];
+}
+
 async function query(sql, params = []) {
   const { rows } = await pool.query(toParams(sql), params);
   return rows;
@@ -130,11 +135,11 @@ async function initDB() {
     company_address: 'HAWALLY BLOCK 4 STREET 4',
     company_phone_p: '965-98818699',
     company_phone_m: '965-99967060',
-    company_email: 'WHITESKYTRAVAL@GMAIL.COM',
+    company_email: 'info@whiteskytravelsagency.com',
     company_logo: '',
     invoice_currency: 'KWD',
     invoice_due_days: '7',
-    invoice_footer: 'Please make all checks payable to WHITE SKY TRAVEL AGENCY.\nTotal due in 07 days.\nwhiteskytraval@gmail.com | M : 98818699 / 99976060',
+    invoice_footer: 'Please make all checks payable to WHITE SKY TRAVEL AGENCY.\nTotal due in 07 days.\ninfo@whiteskytravelsagency.com | M : 98818699 / 99967060',
   };
   for (const [k, v] of Object.entries(defaultSettings)) {
     await pool.query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING', [k, v]);
@@ -253,12 +258,12 @@ app.get('/api/invoices/:id', auth, async (req, res) => {
 });
 app.post('/api/invoices', auth, async (req, res) => {
   try {
-    const { num, client_id, client_name, client_address, client_phone, client_fax, status, date?(date+'').split('t')[0]:null, due_date?(due_date+'').split('t')[0]:null, due_days, tax, deposit, notes, currency, rows } = req.body;
+    const { num, client_id, client_name, client_address, client_phone, client_fax, status, date, due_date, due_days, tax, deposit, notes, currency, rows } = req.body;
     const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
     const taxA = parseFloat(tax) || 0, depA = parseFloat(deposit) || 0;
     const r = await queryOne(
       'INSERT INTO invoices (num,client_id,client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'pending', date?(date+'').split('t')[0]:null, due_date?(due_date+'').split('t')[0]:null, due_days || 7, sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name]);
+      [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'pending', cleanDate(date), cleanDate(due_date), due_days || 7, sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name]);
     for (const row of (rows || [])) {
       await run('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,"airlineRef",travel_date,price) VALUES (?,?,?,?,?,?,?,?)',
         [r.id, row.pnr || '', row.destination || '', row.passenger || '', row.airline || '', row.airlineRef || '', row.travel_date || '', parseFloat(row.price) || 0]);
@@ -275,7 +280,7 @@ app.put('/api/invoices/:id', auth, async (req, res) => {
     const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
     const taxA = parseFloat(tax) || 0, depA = parseFloat(deposit) || 0;
     await run('UPDATE invoices SET client_name=?,client_address=?,client_phone=?,client_fax=?,status=?,date=?,due_date=?,due_days=?,subtotal=?,tax=?,deposit=?,total=?,currency=?,notes=? WHERE id=?',
-      [client_name, client_address || '', client_phone || '', client_fax || '', status, date, due_date, due_days || 7, sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.params.id]);
+      [client_name, client_address || '', client_phone || '', client_fax || '', status, cleanDate(date), cleanDate(due_date), due_days || 7, sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.params.id]);
     await run('DELETE FROM invoice_rows WHERE invoice_id=?', [req.params.id]);
     for (const row of (rows || [])) {
       await run('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,"airlineRef",travel_date,price) VALUES (?,?,?,?,?,?,?,?)',
@@ -332,7 +337,7 @@ app.post('/api/tickets', auth, async (req, res) => {
     const { num, airline, pnr, company, destination, passenger, date, system_issue, net_price, selling_price, status, notes, ticket_type, client_id } = req.body;
     const r = await queryOne(
       'INSERT INTO ticket_sales (num,airline,pnr,company,destination,passenger,date,system_issue,net_price,selling_price,status,notes,ticket_type,client_id,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, airline || '', pnr || '', company || '', destination || '', passenger || '', date || '', system_issue || '', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', ticket_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]);
+      [num, airline || '', pnr || '', company || '', destination || '', passenger || '', cleanDate(date) || '', system_issue || '', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', ticket_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]);
     res.json({ id: r.id, num });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -340,7 +345,7 @@ app.put('/api/tickets/:id', auth, async (req, res) => {
   try {
     const { airline, pnr, company, destination, passenger, date, system_issue, net_price, selling_price, status, notes, ticket_type, client_id } = req.body;
     await run('UPDATE ticket_sales SET airline=?,pnr=?,company=?,destination=?,passenger=?,date=?,system_issue=?,net_price=?,selling_price=?,status=?,notes=?,ticket_type=?,client_id=? WHERE id=?',
-      [airline || '', pnr || '', company || '', destination || '', passenger || '', date || '', system_issue || '', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', ticket_type || 'individual', client_id || null, req.params.id]);
+      [airline || '', pnr || '', company || '', destination || '', passenger || '', cleanDate(date) || '', system_issue || '', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', ticket_type || 'individual', client_id || null, req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -447,4 +452,3 @@ initDB().then(() => {
   console.error('❌ Erreur connexion base de données:', err.message);
   process.exit(1);
 });
-
