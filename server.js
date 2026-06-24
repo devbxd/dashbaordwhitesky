@@ -253,12 +253,12 @@ app.get('/api/invoices/:id', auth, async (req, res) => {
 });
 app.post('/api/invoices', auth, async (req, res) => {
   try {
-    const { num, client_id, client_name, client_address, client_phone, client_fax, status, date, due_date, due_days, tax, deposit, notes, currency, rows } = req.body;
+    const { num, client_id, client_name, client_address, client_phone, client_fax, status, date?(date+'').split('t')[0]:null, due_date?(due_date+'').split('t')[0]:null, due_days, tax, deposit, notes, currency, rows } = req.body;
     const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
     const taxA = parseFloat(tax) || 0, depA = parseFloat(deposit) || 0;
     const r = await queryOne(
       'INSERT INTO invoices (num,client_id,client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'pending', date, due_date, due_days || 7, sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name]);
+      [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'pending', date?(date+'').split('t')[0]:null, due_date?(due_date+'').split('t')[0]:null, due_days || 7, sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name]);
     for (const row of (rows || [])) {
       await run('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,"airlineRef",travel_date,price) VALUES (?,?,?,?,?,?,?,?)',
         [r.id, row.pnr || '', row.destination || '', row.passenger || '', row.airline || '', row.airlineRef || '', row.travel_date || '', parseFloat(row.price) || 0]);
