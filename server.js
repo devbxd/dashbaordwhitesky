@@ -168,7 +168,7 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'whitesky-secret-2024',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 8 * 60 * 60 * 1000 }
+  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 }
 }));
 
 function auth(req, res, next) { if (!req.session.user) return res.status(401).json({ error: 'Non autorisé' }); next(); }
@@ -397,13 +397,13 @@ app.get('/api/reports/summary', auth, async (req, res) => {
     const byMonth = {};
     for (const i of inv) { const m = (i.date || '').slice(0, 7); if (m) { byMonth[m] = (byMonth[m] || 0) + i.total; } }
     const byStatus = { paid: 0, pending: 0, overdue: 0, draft: 0 };
-    for (const i of inv) byStatus[i.status] = (byStatus[i.status] || 0) + i.total;
+    for (const i of inv) byStatus[i.status] = (byStatus[i.status] || 0) + (parseFloat(i.total)||0);
     const byClient = {};
     for (const i of inv) byClient[i.client_name] = (byClient[i.client_name] || 0) + i.total;
     const countResult = await queryOne('SELECT COUNT(*) as c FROM clients');
     res.json({
       paid: byStatus.paid, pending: byStatus.pending, overdue: byStatus.overdue, draft: byStatus.draft,
-      totalPayments: pays.reduce((a, p) => a + p.amount, 0),
+      totalPayments: pays.reduce((a, p) => a + (parseFloat(p.amount)||0), 0),
       invoiceCount: inv.length,
       clientCount: parseInt(countResult.c),
       byMonth, byClient,
@@ -452,3 +452,4 @@ initDB().then(() => {
   console.error('❌ Erreur connexion base de données:', err.message);
   process.exit(1);
 });
+
