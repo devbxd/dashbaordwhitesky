@@ -7,7 +7,7 @@ function openModal(id){document.getElementById(id).classList.remove('hidden');}
 function closeModal(id){document.getElementById(id).classList.add('hidden');}
 
 function fmt(n,cur){const c=cur||settings.invoice_currency||'KWD';return c+' '+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
-function fmtDate(d){if(!d)return'—';const p=d.split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:d;}
+function fmtDate(d){if(!d)return'—';const clean=d.split('T')[0];const p=clean.split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:d;}
 function today(){return new Date().toISOString().split('T')[0];}
 function addDays(d,n){const dt=new Date(d);dt.setDate(dt.getDate()+n);return dt.toISOString().split('T')[0];}
 function initials(n){return(n||'').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();}
