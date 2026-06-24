@@ -572,9 +572,17 @@ function parsePdfText(text) {
     const rows = [];
     let i = 0;
     while (i < rowTokens.length) {
-      const pnr = rowTokens[i]; i++;
-      if (!pnr || pnr === currency || pnr === 'TOTAL') break;
-      const destination = rowTokens[i] || ''; i++;
+      let pnr = rowTokens[i]; i++;
+if (!pnr || pnr === currency || pnr === 'TOTAL') break;
+// Si le token suivant commence par // c'est une suite du PNR
+while (rowTokens[i] && rowTokens[i].startsWith('//')) {
+  pnr += ' ' + rowTokens[i]; i++;
+}
+const destination = rowTokens[i] || ''; i++;
+      
+
+
+
 
       let passengerParts = [];
       while (i < rowTokens.length) {
