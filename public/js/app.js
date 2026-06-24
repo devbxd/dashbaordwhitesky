@@ -513,6 +513,7 @@ async function handlePdfImport(input){
       const content=await page.getTextContent();
       text+=content.items.map(s=>s.str).join(' ')+'\n';
     }
+    console.log('PDF TEXT:', text);
     parsePdfText(text);
   }catch(e){
     errEl.textContent='Error reading PDF: '+e.message;
