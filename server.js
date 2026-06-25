@@ -4,9 +4,11 @@ const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const { Pool } = require('pg');
+const { google } = require('googleapis');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const SHEET_ID = '1gPYfTzGNpV7B_i2sv87p88EGmAN5uvQB58AsEr4lZWY';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_T5CwZxGr9EVW@ep-small-salad-asns7h0n.c-4.eu-central-1.aws.neon.tech/neondb?sslmode=require',
@@ -439,6 +441,94 @@ app.delete('/api/users/:id', patron, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* ─── BACKUP GOOGLE SHEETS ─── */
+async function backupToSheets() {
+  try {
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT) {
+      console.log('⚠️  GOOGLE_SERVICE_ACCOUNT non configuré, backup ignoré');
+      return;
+    }
+    const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
+    const auth = new google.auth.GoogleAuth({
+      credentials: creds,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets']
+    });
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    const [clients, invoices, tickets, payments] = await Promise.all([
+      pool.query('SELECT * FROM clients ORDER BY id'),
+      pool.query('SELECT * FROM invoices ORDER BY id'),
+      pool.query('SELECT * FROM ticket_sales ORDER BY id'),
+      pool.query('SELECT * FROM payments ORDER BY id')
+    ]);
+
+    const now = new Date().toLocaleString('fr-FR');
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: 'Clients!A1',
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [
+          ['ID', 'Nom', 'Email', 'Téléphone', 'Fax', 'Adresse', 'Ville', 'Tag', 'Notes'],
+          ...clients.rows.map(r => [r.id, r.name, r.email||'', r.phone||'', r.fax||'', r.address||'', r.city||'', r.tag||'', r.notes||''])
+        ]
+      }
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: 'Invoices!A1',
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [
+          ['ID', 'Numéro', 'Client', 'Total', 'Devise', 'Statut', 'Date', 'Date Echéance', 'Créé par'],
+          ...invoices.rows.map(r => [r.id, r.num, r.client_name, r.total, r.currency||'KWD', r.status, r.date||'', r.due_date||'', r.owner_name||''])
+        ]
+      }
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: 'Tickets!A1',
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [
+          ['ID', 'Numéro', 'Passager', 'Airline', 'PNR', 'Destination', 'Date', 'Net', 'Vente', 'Profit', 'Statut'],
+          ...tickets.rows.map(r => [r.id, r.num, r.passenger||'', r.airline||'', r.pnr||'', r.destination||'', r.date||'', r.net_price, r.selling_price, r.selling_price - r.net_price, r.status])
+        ]
+      }
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: 'Payments!A1',
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [
+          ['ID', 'Facture', 'Client', 'Montant', 'Méthode', 'Référence', 'Date'],
+          ...payments.rows.map(r => [r.id, r.invoice_num||'', r.client_name||'', r.amount, r.method||'', r.reference||'', r.date||''])
+        ]
+      }
+    });
+
+    console.log(`✅ Backup Google Sheets effectué — ${now}`);
+  } catch (e) {
+    console.error('❌ Backup error:', e.message);
+  }
+}
+
+function scheduleBackup() {
+  const now = new Date();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
+  const msUntilMidnight = midnight - now;
+  setTimeout(() => {
+    backupToSheets();
+    setInterval(backupToSheets, 24 * 60 * 60 * 1000);
+  }, msUntilMidnight);
+  console.log(`⏰ Prochain backup dans ${Math.round(msUntilMidnight / 1000 / 60)} minutes`);
+}
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 initDB().then(() => {
@@ -447,9 +537,11 @@ initDB().then(() => {
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`🌐  Local :   http://localhost:${PORT}`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+    scheduleBackup();
   });
 }).catch(err => {
   console.error('❌ Erreur connexion base de données:', err.message);
   process.exit(1);
 });
+
 
