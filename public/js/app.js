@@ -106,7 +106,7 @@ ${inv.status==='pending'||inv.status==='overdue'?`<div class="info-box info-box-
   </div>
   <div class="inv-pax"><table class="inv-pax-table">
     <thead><tr><th>PNR #</th><th>Destination</th><th>Passenger</th><th>${rows.some(r=>r.airline==='Hotel')?'Hotel':'Airline'}</th><th>Date</th><th>Price</th></tr></thead>
-    <tbody>${rows.length===0?`<tr><td colspan="6" style="text-align:center;color:#bbb;padding:1.5rem">No rows</td></tr>`:rows.map(r=>`<tr><td><span class="inv-pnr">${r.pnr||'—'}</span></td><td>${r.destination||'—'}</td><td>${r.passenger||'—'}</td><td>${r.airlineRef||r.airline||'—'}</td><td>${r.travel_date||'—'}</td><td>$${Number(r.price).toLocaleString('en-US',{minimumFractionDigits:2})}</td></tr>`).join('')}</tbody>
+    <tbody>${rows.length===0?`<tr><td colspan="6" style="text-align:center;color:#bbb;padding:1.5rem">No rows</td></tr>`:rows.map(r=>`<tr><td><span class="inv-pnr">${r.pnr||'—'}</span></td><td>${r.destination||'—'}</td><td>${r.passenger||'—'}</td><td>${r.airlineRef||r.airline||'—'}</td><td>${r.travel_date||'—'}</td><td>${inv.currency||'KWD'} ${Number(r.price).toLocaleString('en-US',{minimumFractionDigits:2})}</td></tr>`).join('')}</tbody>
   </table></div>
   <div class="inv-totals"><div class="inv-totals-inner">
     <div class="inv-tot-row"><span class="lbl">Invoice Subtotal</span><span class="val">${inv.currency||'KWD'} ${Number(inv.subtotal).toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>
