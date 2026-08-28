@@ -141,7 +141,7 @@ ${inv.status==='pending'||inv.status==='overdue'?`<div class="info-box info-box-
 <div id="printable"><div class="inv-wrap card">
   <div class="inv-head">
     <div class="inv-head-left"><div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px">${logoHtml}<div class="inv-company-name">${s.company_name||''}</div></div></div>
-    <div class="inv-head-right"><div class="inv-title">INVOICE</div><div class="inv-meta-grid"><span class="inv-meta-label">Invoice #:</span><span class="inv-meta-val">${inv.num}</span><span class="inv-meta-label">Invoice date:</span><span class="inv-meta-val">${fmtDate(inv.date)}</span>${inv.due_date?`<span class="inv-meta-label">Due date:</span><span class="inv-meta-val">${fmtDate(inv.due_date)}</span>`:''}</div></div>
+    <div class="inv-head-right"><div class="inv-title">INVOICE</div><div class="inv-meta-grid"><span class="inv-meta-label">Invoice #:</span><span class="inv-meta-val">${inv.num}</span><span class="inv-meta-label">Invoice date:</span><span class="inv-meta-val">${fmtDate(inv.date)}</span></div></div>
   </div>
   <div class="inv-bill">
     <div><div class="inv-bill-label">From</div><div class="inv-bill-name">${s.company_name||'—'}</div><div class="inv-bill-meta">${s.company_address||''}<br>P: ${s.company_phone_p||''}<br>M: ${s.company_phone_m||''}<br>${s.company_email||''}</div></div>
