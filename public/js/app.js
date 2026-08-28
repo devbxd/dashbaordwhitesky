@@ -1,5 +1,125 @@
 let currentUser=null,settings={},allClients=[],allInvoices=[],allQuotes=[],allPayments=[],editInvRows=[],editQuoteRows=[],_editInvId=null;
 
+/* ─── LANGUAGE (FR/EN/AR) ───────────────────────────────────────────────
+   No external service, no Google — a local dictionary swapped into the DOM after
+   every render. Works offline, works identically in the desktop app (same page). */
+let currentLang='en';
+const I18N={
+  fr:{
+    "Dashboard":"Tableau de bord","Clients":"Clients","Catalog":"Catalogue","Quotes":"Devis","New Quote":"Nouveau devis",
+    "Invoices":"Factures","Invoice":"Facture","New Invoice":"Nouvelle facture","Edit Invoice":"Modifier la facture",
+    "Ticket Sales":"Ventes de billets","New Ticket":"Nouveau billet","Services":"Services","New Service":"Nouveau service",
+    "Payments":"Paiements","Credit Notes":"Notes de crédit","New Credit Note":"Nouvelle note de crédit","Statements":"Relevés","Reports":"Rapports","Settings":"Paramètres",
+    "Account":"Compte","Finance":"Finance","Invoicing":"Facturation","INVOICING SYSTEM":"SYSTÈME DE FACTURATION","Invoicing System":"Système de facturation",
+    "Dashboard ":"Tableau de bord ","Logout":"Déconnexion","Administrator":"Administrateur","Staff":"Employé","Demo":"Démo","CEO":"PDG",
+    "New Client":"Nouveau client","New Item":"Nouvel article","New User":"Nouvel utilisateur","Edit Client":"Modifier le client","Edit Quote":"Modifier le devis",
+    "Save":"Enregistrer","Save Draft":"Enregistrer le brouillon","Cancel":"Annuler","Delete":"Supprimer","Edit":"Modifier","Back":"Retour",
+    "Print / PDF":"Imprimer / PDF","Confirm Payment":"Confirmer le paiement","Confirm":"Confirmer","Search":"Rechercher","Generate":"Générer",
+    "All periods":"Toutes les périodes","Copy link":"Copier le lien","Send":"Envoyer","Update":"Mettre à jour","Create":"Créer","Add":"Ajouter","Add row":"Ajouter une ligne",
+    "View all":"Voir tout","Quick Actions":"Actions rapides","Import PDF":"Importer un PDF","Sign In":"Se connecter","Username":"Nom d'utilisateur","Password":"Mot de passe",
+    "Client":"Client","Currency":"Devise","Date":"Date","Due Date":"Date d'échéance","Valid until":"Valable jusqu'au","Status":"Statut",
+    "Payment terms (days)":"Délai de paiement (jours)","Name":"Nom","Email":"Email","Phone":"Téléphone","Fax":"Fax","Address":"Adresse",
+    "City / Country":"Ville / Pays","Type":"Type","Notes":"Notes","Total":"Total","Subtotal":"Sous-total","Tax":"Taxe","Tax Rate":"Taux de taxe",
+    "Deposit received":"Acompte reçu","Deposit Received":"Acompte reçu","Balance due":"Solde dû","Amount due":"Montant dû","Amount received":"Montant reçu",
+    "Payment method":"Méthode de paiement","Reference":"Référence","Already paid":"Déjà payé","Client (Bill to)":"Client (Facturé à)","Bill to":"Facturé à",
+    "Draft":"Brouillon","Pending":"En attente","Paid":"Payée","Overdue":"En retard","Sent":"Envoyé","Accepted":"Accepté","Refused":"Refusé",
+    "Refunded":"Remboursée","Partially Paid":"Partiellement payée","Unpaid":"Impayé","All statuses":"Tous les statuts",
+    "#":"N°","Actions":"Actions","Created by":"Créé par","Method":"Méthode","Amount":"Montant","Category":"Catégorie","Price":"Prix",
+    "No invoices":"Aucune facture","No clients":"Aucun client","No quotes":"Aucun devis","No items yet":"Aucun article pour l'instant",
+    "No credit notes":"Aucune note de crédit","No paid invoices":"Aucune facture payée","No tickets":"Aucun billet",
+    "Collected":"Encaissé","Total Invoices":"Total factures","Outstanding Invoices":"Factures en attente","Overdue":"En retard",
+    "Information":"Informations","Company Logo":"Logo de l'entreprise","Signature Image":"Image de signature","Stamp Image":"Image du tampon",
+    "Company Information":"Informations de l'entreprise","Default Billing":"Facturation par défaut","Users":"Utilisateurs","Language":"Langue",
+    "Invoice footer":"Pied de page de la facture","Remove logo":"Supprimer le logo","Remove signature":"Supprimer la signature","Remove stamp":"Supprimer le tampon",
+    "Save Settings":"Enregistrer les paramètres","Client, number…":"Client, numéro…","Search…":"Rechercher…","Passengers / Services":"Passagers / Services",
+    "Mark as Paid":"Marquer comme payée","Record Payment":"Enregistrer un paiement","Mark Unpaid":"Marquer comme impayée","Issue Credit Note":"Émettre une note de crédit",
+    "Email to Client":"Envoyer par email","Record Another Payment":"Enregistrer un autre paiement","Reports · Period":"Rapports · Période",
+    "Revenue by month":"Revenus par mois","Top clients":"Meilleurs clients","Investment summary":"Résumé","Welcome back,":"Bon retour,",
+    "Select client":"Sélectionner un client","-- Select --":"-- Sélectionner --","Passenger":"Passager","Destination":"Destination","Airline":"Compagnie",
+    "PNR #":"N° PNR","Travel Date":"Date de voyage","Client (Bill to) *":"Client (Facturé à) *","Payment method *":"Méthode de paiement *",
+    "Due":"Échéance","No outstanding invoices":"Aucune facture en attente","Invoicing":"Facturation","Total invoices":"Total factures",
+    "Yes":"Oui","No":"Non","Loading…":"Chargement…"
+  },
+  ar:{
+    "Dashboard":"لوحة التحكم","Clients":"العملاء","Catalog":"الكتالوج","Quotes":"عروض الأسعار","New Quote":"عرض سعر جديد",
+    "Invoices":"الفواتير","Invoice":"فاتورة","New Invoice":"فاتورة جديدة","Edit Invoice":"تعديل الفاتورة",
+    "Ticket Sales":"مبيعات التذاكر","New Ticket":"تذكرة جديدة","Services":"الخدمات","New Service":"خدمة جديدة",
+    "Payments":"المدفوعات","Credit Notes":"إشعارات دائن","New Credit Note":"إشعار دائن جديد","Statements":"كشوف الحساب","Reports":"التقارير","Settings":"الإعدادات",
+    "Account":"الحساب","Finance":"المالية","Invoicing":"الفوترة","INVOICING SYSTEM":"نظام الفوترة","Invoicing System":"نظام الفوترة",
+    "Logout":"تسجيل الخروج","Administrator":"مدير","Staff":"موظف","Demo":"تجريبي","CEO":"الرئيس التنفيذي",
+    "New Client":"عميل جديد","New Item":"عنصر جديد","New User":"مستخدم جديد","Edit Client":"تعديل العميل","Edit Quote":"تعديل عرض السعر",
+    "Save":"حفظ","Save Draft":"حفظ كمسودة","Cancel":"إلغاء","Delete":"حذف","Edit":"تعديل","Back":"رجوع",
+    "Print / PDF":"طباعة / PDF","Confirm Payment":"تأكيد الدفع","Confirm":"تأكيد","Search":"بحث","Generate":"إنشاء",
+    "All periods":"كل الفترات","Copy link":"نسخ الرابط","Send":"إرسال","Update":"تحديث","Create":"إنشاء","Add":"إضافة","Add row":"إضافة سطر",
+    "View all":"عرض الكل","Quick Actions":"إجراءات سريعة","Import PDF":"استيراد PDF","Sign In":"تسجيل الدخول","Username":"اسم المستخدم","Password":"كلمة المرور",
+    "Client":"العميل","Currency":"العملة","Date":"التاريخ","Due Date":"تاريخ الاستحقاق","Valid until":"صالح حتى","Status":"الحالة",
+    "Payment terms (days)":"مدة السداد (أيام)","Name":"الاسم","Email":"البريد الإلكتروني","Phone":"الهاتف","Fax":"فاكس","Address":"العنوان",
+    "City / Country":"المدينة / الدولة","Type":"النوع","Notes":"ملاحظات","Total":"الإجمالي","Subtotal":"المجموع الفرعي","Tax":"الضريبة","Tax Rate":"نسبة الضريبة",
+    "Deposit received":"الدفعة المقدمة","Deposit Received":"الدفعة المقدمة","Balance due":"الرصيد المستحق","Amount due":"المبلغ المستحق","Amount received":"المبلغ المستلم",
+    "Payment method":"طريقة الدفع","Reference":"المرجع","Already paid":"المدفوع مسبقاً","Client (Bill to)":"العميل (يُفوتر إلى)","Bill to":"يُفوتر إلى",
+    "Draft":"مسودة","Pending":"قيد الانتظار","Paid":"مدفوعة","Overdue":"متأخرة","Sent":"مُرسل","Accepted":"مقبول","Refused":"مرفوض",
+    "Refunded":"مُرجعة","Partially Paid":"مدفوعة جزئياً","Unpaid":"غير مدفوع","All statuses":"كل الحالات",
+    "#":"#","Actions":"إجراءات","Created by":"أنشأه","Method":"الطريقة","Amount":"المبلغ","Category":"الفئة","Price":"السعر",
+    "No invoices":"لا توجد فواتير","No clients":"لا يوجد عملاء","No quotes":"لا توجد عروض أسعار","No items yet":"لا توجد عناصر بعد",
+    "No credit notes":"لا توجد إشعارات دائن","No paid invoices":"لا توجد فواتير مدفوعة","No tickets":"لا توجد تذاكر",
+    "Collected":"المُحصّل","Total Invoices":"إجمالي الفواتير","Outstanding Invoices":"الفواتير المستحقة",
+    "Information":"معلومات","Company Logo":"شعار الشركة","Signature Image":"صورة التوقيع","Stamp Image":"صورة الختم",
+    "Company Information":"معلومات الشركة","Default Billing":"الفوترة الافتراضية","Users":"المستخدمون","Language":"اللغة",
+    "Invoice footer":"تذييل الفاتورة","Remove logo":"إزالة الشعار","Remove signature":"إزالة التوقيع","Remove stamp":"إزالة الختم",
+    "Save Settings":"حفظ الإعدادات","Client, number…":"العميل، الرقم…","Search…":"بحث…","Passengers / Services":"الركاب / الخدمات",
+    "Mark as Paid":"وضع علامة كمدفوعة","Record Payment":"تسجيل دفعة","Mark Unpaid":"وضع علامة كغير مدفوعة","Issue Credit Note":"إصدار إشعار دائن",
+    "Email to Client":"إرسال بالبريد للعميل","Record Another Payment":"تسجيل دفعة أخرى",
+    "Revenue by month":"الإيرادات الشهرية","Top clients":"أفضل العملاء","Investment summary":"الملخص","Welcome back,":"مرحباً بعودتك،",
+    "Select client":"اختر العميل","-- Select --":"-- اختر --","Passenger":"الراكب","Destination":"الوجهة","Airline":"شركة الطيران",
+    "PNR #":"رقم الحجز","Travel Date":"تاريخ السفر","Client (Bill to) *":"العميل (يُفوتر إلى) *","Payment method *":"طريقة الدفع *",
+    "Due":"تاريخ الاستحقاق","No outstanding invoices":"لا توجد فواتير مستحقة","Invoicing":"الفوترة","Total invoices":"إجمالي الفواتير",
+    "Yes":"نعم","No":"لا","Loading…":"جارٍ التحميل…"
+  }
+};
+// Every text node remembers its own original English wording the first time it's seen
+// (cached on the node object itself) — every re-translation always starts fresh from
+// that baseline, so switching FR -> AR -> EN in the same session never leaves stale
+// translated leftovers behind, however many times you flip languages.
+function _translateTextNode(node){
+  if(!node._enOriginal){const t=node.textContent.trim();if(!t)return;node._enOriginal=node.textContent;}
+  const raw=node._enOriginal,trimmed=raw.trim();
+  if(currentLang==='en'){node.textContent=raw;return;}
+  const dict=I18N[currentLang];
+  node.textContent=(dict&&dict[trimmed])?raw.replace(trimmed,dict[trimmed]):raw;
+}
+function translateNode(root){
+  if(!root)return;
+  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null);
+  const nodes=[];let n;while(n=walker.nextNode())nodes.push(n);
+  nodes.forEach(_translateTextNode);
+  if(root.querySelectorAll&&currentLang!=='en'){
+    const dict=I18N[currentLang];
+    if(dict){
+      root.querySelectorAll('[placeholder]').forEach(el=>{const t=el.getAttribute('placeholder');if(dict[t])el.setAttribute('placeholder',dict[t]);});
+      root.querySelectorAll('[title]').forEach(el=>{const t=el.getAttribute('title');if(dict[t])el.setAttribute('title',dict[t]);});
+    }
+  }
+}
+function applyLanguage(lang){
+  currentLang=lang||'en';
+  document.documentElement.setAttribute('lang',currentLang);
+  document.documentElement.setAttribute('dir',currentLang==='ar'?'rtl':'ltr');
+  translateNode(document.body);
+  // Re-render the current page from its source template so any page-specific content
+  // (not just the static sidebar) rebuilds cleanly in the new language too.
+  const activePage=document.querySelector('.nav-item.active')?.dataset.page;
+  if(activePage&&currentUser)showPage(activePage);
+}
+const _langObserver=new MutationObserver(muts=>{
+  muts.forEach(m=>{
+    m.addedNodes.forEach(node=>{
+      if(node.nodeType===1)translateNode(node);
+      else if(node.nodeType===3)_translateTextNode(node);
+    });
+  });
+});
+document.addEventListener('DOMContentLoaded',()=>{_langObserver.observe(document.body,{childList:true,subtree:true,characterData:true});});
+
 async function api(method,url,body){const o={method,headers:{'Content-Type':'application/json'}};if(body!==undefined)o.body=JSON.stringify(body);const r=await fetch(url,o);return r.json();}
 
 function toast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+type;clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast hidden',3000);}
@@ -11,7 +131,7 @@ function fmtDate(d){if(!d)return'—';const clean=d.split('T')[0];const p=clean.
 function today(){return new Date().toISOString().split('T')[0];}
 function addDays(d,n){const dt=new Date(d);dt.setDate(dt.getDate()+n);return dt.toISOString().split('T')[0];}
 function initials(n){return(n||'').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();}
-function statusBadge(s){const cls={paid:'badge-paid',pending:'badge-pending',overdue:'badge-overdue',draft:'badge-draft',sent:'badge-sent',accepted:'badge-accepted',refused:'badge-refused',refunded:'badge-refunded'};const lbl={paid:'Paid',pending:'Pending',overdue:'Overdue',draft:'Draft',sent:'Sent',accepted:'Accepted',refused:'Refused',refunded:'Refunded'};return`<span class="badge ${cls[s]||'badge-draft'}">${lbl[s]||s}</span>`;}
+function statusBadge(s){const cls={paid:'badge-paid',pending:'badge-pending',overdue:'badge-overdue',draft:'badge-draft',sent:'badge-sent',accepted:'badge-accepted',refused:'badge-refused',refunded:'badge-refunded',partial:'badge-partial'};const lbl={paid:'Paid',pending:'Pending',overdue:'Overdue',draft:'Draft',sent:'Sent',accepted:'Accepted',refused:'Refused',refunded:'Refunded',partial:'Partially Paid'};return`<span class="badge ${cls[s]||'badge-draft'}">${lbl[s]||s}</span>`;}
 function tagBadge(t){const cls={VIP:'badge-vip',New:'badge-new',Regular:'badge-regular'};return`<span class="badge ${cls[t]||'badge-draft'}">${t||'New'}</span>`;}
 
 /* DOMAIN LABELS — lets the same invoice/ticket engine speak "travel" for White Sky or
@@ -45,10 +165,42 @@ function dl(){
 }
 
 /* AUTH */
-async function init(){const{user}=await api('GET','/api/me');settings=await api('GET','/api/settings').catch(()=>({}));if(user){currentUser=user;showApp();showPage('dashboard');}else{document.getElementById('login-screen').style.display='flex';}}
+/* Login screen branding — this device remembers the last account that signed in here
+   (localStorage, per install/browser) so a white-labeled desktop build shows the
+   client's own name and logo instead of a hardcoded company, from the second launch on. */
+function applyLoginBrandingFromCache(){
+  try{
+    const name=localStorage.getItem('brand_name');
+    const logo=localStorage.getItem('brand_logo');
+    if(name)document.getElementById('login-company-name').textContent=name;
+    if(logo)document.getElementById('login-logo-circle').innerHTML=`<img src="${logo}" style="width:100%;height:100%;object-fit:contain;border-radius:16px"/>`;
+  }catch(e){}
+}
+function cacheLoginBranding(){
+  try{
+    localStorage.setItem('brand_name',settings.company_name||currentUser.display_name||'');
+    if(settings.company_logo)localStorage.setItem('brand_logo',settings.company_logo);
+  }catch(e){}
+}
+applyLoginBrandingFromCache();
+async function init(){const{user}=await api('GET','/api/me');settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);if(user){currentUser=user;cacheLoginBranding();showApp();showPage('dashboard');}else{document.getElementById('login-screen').style.display='flex';translateNode(document.getElementById('login-screen'));}}
 document.getElementById('btn-login').addEventListener('click',doLogin);
 ['login-user','login-pass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();}));
-async function doLogin(){const btn=document.getElementById('btn-login');const err=document.getElementById('login-error');btn.textContent='…';btn.disabled=true;const data=await api('POST','/api/login',{username:document.getElementById('login-user').value.trim(),password:document.getElementById('login-pass').value});btn.textContent='Sign In';btn.disabled=false;if(data.success){currentUser=data.user;err.style.display='none';settings=await api('GET','/api/settings').catch(()=>({}));showApp();showPage('dashboard');}else{err.textContent=data.error||'Invalid credentials';err.style.display='block';}}
+async function doLogin(){const btn=document.getElementById('btn-login');const err=document.getElementById('login-error');btn.textContent='…';btn.disabled=true;const data=await api('POST','/api/login',{username:document.getElementById('login-user').value.trim(),password:document.getElementById('login-pass').value});btn.textContent='Sign In';btn.disabled=false;if(data.success){currentUser=data.user;err.style.display='none';settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);cacheLoginBranding();await playWelcome(currentUser.display_name,currentUser.role==='cyber');showApp();showPage('dashboard');}else{err.textContent=data.error||'Invalid credentials';err.style.display='block';}}
+function playWelcome(name,cyber){
+  const overlay=document.getElementById('welcome-overlay');
+  document.getElementById('welcome-icon-i').className=cyber?'ti ti-shield-lock':'ti ti-plane';
+  document.getElementById('welcome-name').textContent=name||'';
+  document.getElementById('login-screen').style.display='none';
+  overlay.classList.remove('hidden');
+  requestAnimationFrame(()=>overlay.classList.add('show'));
+  return new Promise(resolve=>{
+    setTimeout(()=>{
+      overlay.classList.add('leaving');
+      setTimeout(()=>{overlay.classList.add('hidden');overlay.classList.remove('show','leaving');resolve();},500);
+    },1300);
+  });
+}
 document.getElementById('btn-logout').addEventListener('click',async()=>{await api('POST','/api/logout');currentUser=null;document.getElementById('app-screen').classList.add('hidden');document.getElementById('login-screen').style.display='flex';document.getElementById('login-pass').value='';});
 function showApp(){document.getElementById('login-screen').style.display='none';document.getElementById('app-screen').classList.remove('hidden');document.getElementById('user-avatar').textContent=initials(currentUser.display_name);document.getElementById('user-name-display').textContent=currentUser.display_name;const roleLabels={patron:'Administrator',employe:'Staff',demo:'Demo',cyber:'CEO'};document.getElementById('user-role-display').textContent=roleLabels[currentUser.role]||'Staff';applyBranding();}
 function applyBranding(){
@@ -66,7 +218,7 @@ function applyBranding(){
 
 /* NAV */
 document.querySelectorAll('.nav-item[data-page]').forEach(item=>item.addEventListener('click',()=>showPage(item.dataset.page)));
-function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML='<div class="loading-page"><i class="ti ti-loader spin"></i> Loading…</div>';const pages={dashboard:pageDashboard,clients:pageClients,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,payments:pagePayments,statements:pageStatements,reports:pageReports,settings:pageSettings};if(pages[page])pages[page](mc);}
+function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML='<div class="loading-page"><i class="ti ti-loader spin"></i> Loading…</div>';const pages={dashboard:pageDashboard,clients:pageClients,catalog:pageCatalog,quotes:pageQuotes,'new-quote':pageNewQuote,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,payments:pagePayments,'credit-notes':pageCreditNotes,statements:pageStatements,reports:pageReports,settings:pageSettings};if(pages[page])pages[page](mc);}
 
 /* DASHBOARD */
 async function pageDashboard(mc){const[invData,rpt]=await Promise.all([api('GET','/api/invoices'),api('GET','/api/reports/summary')]);allInvoices=invData;const out=allInvoices.filter(i=>i.status!=='paid'&&i.status!=='draft');mc.innerHTML=`
@@ -103,6 +255,15 @@ function openClientModal(id){const c=id?allClients.find(x=>x.id===id):null;docum
 document.getElementById('btn-save-client').addEventListener('click',async()=>{const name=document.getElementById('c-name').value.trim();if(!name){toast('Name is required','error');return;}const id=document.getElementById('edit-client-id').value;const body={name,email:document.getElementById('c-email').value.trim(),phone:document.getElementById('c-phone').value.trim(),fax:document.getElementById('c-fax').value.trim(),address:document.getElementById('c-address').value.trim(),city:document.getElementById('c-city').value.trim(),tag:document.getElementById('c-tag').value,notes:document.getElementById('c-notes').value.trim()};if(id)await api('PUT',`/api/clients/${id}`,body);else await api('POST','/api/clients',body);toast(id?'✅ Client updated':'✅ Client added','success');closeModal('modal-client');showPage('clients');});
 async function deleteClient(id){if(!confirm('Delete this client?'))return;await api('DELETE',`/api/clients/${id}`);toast('Client deleted');showPage('clients');}
 
+/* CATALOG */
+let allItems=[];
+async function pageCatalog(mc){allItems=await api('GET','/api/items');mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">Catalog</div><div class="page-sub">${allItems.length} reusable item(s) — pick them while building a quote or invoice</div></div><button class="btn-new" onclick="openItemModal()"><i class="ti ti-plus"></i> New Item</button></div>
+<div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Default price</th><th>Actions</th></tr></thead><tbody>${allItems.length===0?`<tr><td colspan="4"><div class="empty-state"><i class="ti ti-tag"></i><h3>No items yet</h3><p>Add your frequently sold services or packages here.</p></div></td></tr>`:allItems.map(it=>`<tr><td style="font-weight:700">${it.name}</td><td style="color:#888">${it.category||'—'}</td><td style="font-weight:700">${fmt(it.price,it.currency)}</td><td class="actions-cell"><button class="action-btn edit" onclick="openItemModal(${it.id})"><i class="ti ti-edit"></i></button><button class="action-btn danger" onclick="deleteItem(${it.id})"><i class="ti ti-trash"></i></button></td></tr>`).join('')}</tbody></table></div></div>`;}
+function openItemModal(id){const it=id?allItems.find(x=>x.id===id):null;document.getElementById('modal-item-title').textContent=it?'Edit Item':'New Item';document.getElementById('edit-item-id').value=it?it.id:'';document.getElementById('it-name').value=it?.name||'';document.getElementById('it-category').value=it?.category||'';document.getElementById('it-price').value=it?.price||0;document.getElementById('it-currency').value=it?.currency||settings.invoice_currency||'KWD';openModal('modal-item');}
+document.getElementById('btn-save-item').addEventListener('click',async()=>{const name=document.getElementById('it-name').value.trim();if(!name){toast('Name is required','error');return;}const id=document.getElementById('edit-item-id').value;const body={name,category:document.getElementById('it-category').value.trim(),price:document.getElementById('it-price').value||0,currency:document.getElementById('it-currency').value};if(id)await api('PUT',`/api/items/${id}`,body);else await api('POST','/api/items',body);toast(id?'✅ Item updated':'✅ Item added','success');closeModal('modal-item');showPage('catalog');});
+async function deleteItem(id){if(!confirm('Delete this item from the catalog?'))return;await api('DELETE',`/api/items/${id}`);toast('Item deleted');showPage('catalog');}
+
 /* INVOICES LIST */
 async function pageInvoices(mc){allInvoices=await api('GET','/api/invoices');mc.innerHTML=`
 <div class="page-header"><div><div class="page-title">Invoices</div><div class="page-sub">${allInvoices.length} invoice(s)${currentUser.role==='employe'?' — your invoices only':''}</div></div><div class="header-actions"><button class="btn-new" onclick="showPage('new-invoice')"><i class="ti ti-plus"></i> New Invoice</button>${dl().importPdf?`<button class="btn-secondary" onclick="openPdfImport()"><i class="ti ti-file-import"></i> Import PDF</button>`:''}</div></div>
@@ -114,14 +275,14 @@ function filterInv(){const q=document.getElementById('inv-q')?.value||'';const s
 
 /* MODAL PAYMENT */
 let _payInvId=null,_payInv=null;
-async function openPayModal(id){_payInvId=id;const inv=await api('GET',`/api/invoices/${id}`);_payInv=inv;document.getElementById('pay-inv-num').textContent=inv.num;document.getElementById('pay-inv-client').textContent=inv.client_name;document.getElementById('pay-inv-amount').textContent=fmt(inv.total,inv.currency);document.getElementById('pay-method').value='Cash';document.getElementById('pay-reference').value='';document.getElementById('pay-notes').value='';openModal('modal-payment');}
-document.getElementById('btn-confirm-pay').addEventListener('click',async()=>{if(!_payInvId||!_payInv)return;const method=document.getElementById('pay-method').value;const reference=document.getElementById('pay-reference').value.trim();const notes=document.getElementById('pay-notes').value.trim();const r=await api('POST','/api/payments',{invoice_id:_payInvId,invoice_num:_payInv.num,client_name:_payInv.client_name,amount:_payInv.total,method,reference,date:today(),notes});if(r&&r.error){toast(r.error,'error');return;}closeModal('modal-payment');toast('✅ Payment recorded','success');const active=document.querySelector('.nav-item.active');const page=active?active.dataset.page:'invoices';if(page==='dashboard')showPage('dashboard');else showPage('invoices');});
+async function openPayModal(id){_payInvId=id;const[inv,hist]=await Promise.all([api('GET',`/api/invoices/${id}`),api('GET',`/api/invoices/${id}/payments`)]);_payInv=inv;document.getElementById('pay-inv-num').textContent=inv.num;document.getElementById('pay-inv-client').textContent=inv.client_name;document.getElementById('pay-inv-already').textContent=fmt(hist.totalPaid,inv.currency);document.getElementById('pay-inv-amount').textContent=fmt(hist.balance,inv.currency);document.getElementById('pay-amount').value=hist.balance;document.getElementById('pay-method').value='Cash';document.getElementById('pay-reference').value='';document.getElementById('pay-notes').value='';openModal('modal-payment');}
+document.getElementById('btn-confirm-pay').addEventListener('click',async()=>{if(!_payInvId||!_payInv)return;const amount=parseFloat(document.getElementById('pay-amount').value)||0;if(amount<=0){toast('Enter an amount greater than 0','error');return;}const method=document.getElementById('pay-method').value;const reference=document.getElementById('pay-reference').value.trim();const notes=document.getElementById('pay-notes').value.trim();const r=await api('POST','/api/payments',{invoice_id:_payInvId,invoice_num:_payInv.num,client_name:_payInv.client_name,amount,method,reference,date:today(),notes});if(r&&r.error){toast(r.error,'error');return;}closeModal('modal-payment');toast('✅ Payment recorded','success');viewInvoice(_payInvId);});
 async function markUnpaid(id){if(!confirm('Mark this invoice as unpaid?\nThe associated payment will be deleted.'))return;await api('PATCH',`/api/invoices/${id}/status`,{status:'pending'});toast('Invoice marked as unpaid','error');viewInvoice(id);}
 async function deleteInvoice(id){if(!confirm('Delete this invoice?'))return;await api('DELETE',`/api/invoices/${id}`);toast('Invoice deleted');showPage('invoices');}
 
 /* VIEW INVOICE */
 async function viewInvoice(id){
-  const inv=await api('GET',`/api/invoices/${id}`);
+  const[inv,hist]=await Promise.all([api('GET',`/api/invoices/${id}`),api('GET',`/api/invoices/${id}/payments`)]);
   const rows=inv.rows||[];
   const s=settings;
   const logoHtml=s.company_logo?`<img src="${s.company_logo}" class="inv-logo" alt="Logo"/>`:`<div class="inv-logo-placeholder"><i class="${isCyber()?'ti ti-shield-lock':'ti ti-plane'}"></i></div>`;
@@ -132,12 +293,16 @@ async function viewInvoice(id){
 <div class="header-actions">
   <button class="btn-secondary" onclick="showPage('invoices')"><i class="ti ti-arrow-left"></i> Back</button>
   <button class="btn-secondary" onclick="editInvoice(${inv.id})"><i class="ti ti-edit"></i> Edit</button>
-  ${inv.status!=='paid'?`<button class="btn-new" onclick="openPayModal(${inv.id})"><i class="ti ti-check"></i> Mark as Paid</button>`:''}
-  ${inv.status==='paid'?`<button class="btn-unpaid" onclick="markUnpaid(${inv.id})"><i class="ti ti-x"></i> Mark Unpaid</button>`:''}
+  ${inv.status!=='paid'?`<button class="btn-new" onclick="openPayModal(${inv.id})"><i class="ti ti-check"></i> ${inv.status==='partial'?'Record Another Payment':'Record Payment'}</button>`:''}
+  ${(inv.status==='paid'||inv.status==='partial')?`<button class="btn-unpaid" onclick="markUnpaid(${inv.id})"><i class="ti ti-x"></i> Mark Unpaid</button>`:''}
+  ${inv.status!=='refunded'?`<button class="btn-secondary" onclick="openCreditNoteModal(${inv.id})"><i class="ti ti-receipt-refund"></i> Issue Credit Note</button>`:''}
+  <button class="btn-secondary" onclick="openEmailModal(${inv.id})"><i class="ti ti-mail"></i> Email to Client</button>
   <button class="btn-secondary" onclick="printInv()"><i class="ti ti-printer"></i> Print / PDF</button>
 </div></div>
-${inv.status==='paid'?`<div class="info-box info-box-paid"><i class="ti ti-circle-check"></i> This invoice has been paid.</div>`:''}
+${inv.status==='paid'?`<div class="info-box info-box-paid"><i class="ti ti-circle-check"></i> This invoice has been paid in full.</div>`:''}
+${inv.status==='partial'?`<div class="info-box info-box-unpaid"><i class="ti ti-alert-circle"></i> Partially paid — ${fmt(hist.balance,inv.currency)} still due.</div>`:''}
 ${inv.status==='pending'||inv.status==='overdue'?`<div class="info-box info-box-unpaid"><i class="ti ti-alert-circle"></i> This invoice has not been paid yet.</div>`:''}
+${hist.payments&&hist.payments.length?`<div class="card"><div class="card-header"><span class="card-title"><i class="ti ti-history" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Payment history</span></div><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Date</th><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Method</th><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Reference</th><th style="text-align:right;font-size:11px;color:#888;padding:6px 4px">Amount</th></tr></thead><tbody>${hist.payments.map(p=>`<tr><td style="padding:6px 4px;font-size:13px">${fmtDate(p.date)}</td><td style="padding:6px 4px"><span class="pay-method-badge">${p.method}</span></td><td style="padding:6px 4px;color:#aaa;font-size:12px">${p.reference||'—'}</td><td style="padding:6px 4px;text-align:right;font-weight:700;color:#1a7a3a">${fmt(p.amount,inv.currency)}</td></tr>`).join('')}</tbody><tfoot><tr style="border-top:1.5px solid #eee"><td colspan="3" style="padding:8px 4px;font-weight:700">Balance due</td><td style="padding:8px 4px;text-align:right;font-weight:800;color:${hist.balance>0?'#b71c1c':'#1a7a3a'}">${fmt(hist.balance,inv.currency)}</td></tr></tfoot></table></div>`:''}
 <div id="printable"><div class="inv-wrap card">
   <div class="inv-head">
     <div class="inv-head-left"><div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px">${logoHtml}<div class="inv-company-name">${s.company_name||''}</div></div></div>
@@ -219,6 +384,19 @@ body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#1a1a2e;backgr
   win.document.close();
 }
 
+let _emailInvId=null;
+function openEmailModal(id){_emailInvId=id;const inv=allInvoices.find(i=>i.id===id);const client=inv&&inv.client_id?allClients.find(c=>c.id===inv.client_id):null;document.getElementById('em-to').value=client?.email||'';document.getElementById('em-message').value='';openModal('modal-email');}
+document.getElementById('btn-send-email').addEventListener('click',async()=>{
+  const to=document.getElementById('em-to').value.trim();
+  if(!to){toast('Enter a recipient email','error');return;}
+  const btn=document.getElementById('btn-send-email');btn.disabled=true;btn.textContent='Sending…';
+  const r=await api('POST',`/api/invoices/${_emailInvId}/send-email`,{to,message:document.getElementById('em-message').value.trim()});
+  btn.disabled=false;btn.innerHTML='<i class="ti ti-send"></i> Send';
+  if(r&&r.error){toast(r.error,'error');return;}
+  toast('✅ Email sent','success');
+  closeModal('modal-email');
+});
+
 
 
 
@@ -239,8 +417,8 @@ function fillClient(sel){const o=sel.querySelector(`option[value="${sel.value}"]
 function setAllAirlineType(val){editInvRows.forEach(r=>r.airline=val);renderInvRows();setTimeout(()=>{const sel=document.getElementById('col-airline-type');if(sel)sel.value=val;},10);}
 
 /* NEW/EDIT INVOICE */
-async function pageNewInvoice(mc){_editInvId=null;editInvRows=[{pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0}];allClients=await api('GET','/api/clients');const{num}=await api('GET','/api/invoices/next-num');renderInvForm(mc,{num,date:today(),due_date:addDays(today(),parseInt(settings.invoice_due_days)||7),status:'pending',currency:settings.invoice_currency||'KWD',tax:0,deposit:0,due_days:settings.invoice_due_days||7});}
-async function editInvoice(id){_editInvId=id;const inv=await api('GET',`/api/invoices/${id}`);editInvRows=inv.rows&&inv.rows.length?inv.rows.map(r=>({...r,airlineRef:r.airlineRef||''})):[{pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0}];allClients=await api('GET','/api/clients');const mc=document.getElementById('main-content');document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));renderInvForm(mc,inv);}
+async function pageNewInvoice(mc){_editInvId=null;editInvRows=[{pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0}];[allClients,allItems]=await Promise.all([api('GET','/api/clients'),api('GET','/api/items')]);const{num}=await api('GET','/api/invoices/next-num');renderInvForm(mc,{num,date:today(),due_date:addDays(today(),parseInt(settings.invoice_due_days)||7),status:'pending',currency:settings.invoice_currency||'KWD',tax:0,deposit:0,due_days:settings.invoice_due_days||7});}
+async function editInvoice(id){_editInvId=id;const inv=await api('GET',`/api/invoices/${id}`);editInvRows=inv.rows&&inv.rows.length?inv.rows.map(r=>({...r,airlineRef:r.airlineRef||''})):[{pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0}];[allClients,allItems]=await Promise.all([api('GET','/api/clients'),api('GET','/api/items')]);const mc=document.getElementById('main-content');document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));renderInvForm(mc,inv);}
 function newInvoiceFor(cid,cname,caddr,cphone,cfax){showPage('new-invoice');setTimeout(()=>{const sel=document.getElementById('inv-client');if(sel)sel.value=cid;[['inv-client-name',cname],['inv-client-addr',caddr],['inv-client-phone',cphone],['inv-client-fax',cfax]].forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.value=v||'';});},150);}
 
 function renderInvForm(mc,inv){
@@ -275,6 +453,7 @@ function renderInvForm(mc,inv){
 <tbody id="inv-rows"></tbody>
 </table></div>
 <button class="btn-add-row" onclick="addInvRow()"><i class="ti ti-plus" style="vertical-align:-2px;margin-right:4px"></i>Add row</button>
+${allItems.length?`<select class="form-input" style="display:inline-block;width:auto;margin-left:10px;font-size:12px;padding:6px 8px" onchange="addRowFromCatalog(editInvRows,renderInvRows,this.value);this.value=''"><option value="">+ Add from catalog…</option>${allItems.map(it=>`<option value="${it.id}">${it.name} — ${fmt(it.price,it.currency)}</option>`).join('')}</select>`:''}
 <div class="totals-box"><div class="totals-row"><span>Subtotal</span><span id="inv-subtotal" style="font-weight:700">0.00</span></div><div class="totals-row"><span>Tax</span><input type="number" class="form-input" id="inv-tax" value="${inv.tax||0}" min="0" step="0.01" oninput="calcInvTotal()"/></div><div class="totals-row"><span>Deposit received</span><input type="number" class="form-input" id="inv-deposit" value="${inv.deposit||0}" min="0" step="0.01" oninput="calcInvTotal()"/></div><div class="totals-row total-final"><span>TOTAL</span><span id="inv-total" style="font-size:20px">0.00</span></div></div>
 <div class="form-group" style="margin-top:1rem"><label class="form-label">Notes</label><textarea class="form-input" id="inv-notes" rows="2">${inv.notes||''}</textarea></div>
 <div class="form-actions"><button class="btn-secondary" onclick="showPage('invoices')">Cancel</button><button class="btn-secondary" onclick="saveInv('draft')"><i class="ti ti-device-floppy" style="vertical-align:-2px;margin-right:5px"></i>Save Draft</button><button class="btn-save" onclick="saveInv('pending')"><i class="ti ti-send" style="vertical-align:-2px;margin-right:5px"></i>Issue Invoice</button></div>
@@ -290,9 +469,170 @@ function renderInvRows(){const t=document.getElementById('inv-rows');if(!t)retur
 <td><button class="action-btn danger" onclick="removeInvRow(${i})"><i class="ti ti-x"></i></button></td>
 </tr>`).join('');calcInvTotal();}
 function addInvRow(){editInvRows.push({pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0});renderInvRows();}
+function addRowFromCatalog(rowsArr,renderFn,itemId){if(!itemId)return;const it=allItems.find(x=>x.id==itemId);if(!it)return;rowsArr.push({pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:it.name,travel_date:'',price:it.price});renderFn();}
 function removeInvRow(i){if(editInvRows.length===1){toast('At least one row required');return;}editInvRows.splice(i,1);renderInvRows();}
 function calcInvTotal(){const sub=editInvRows.reduce((a,r)=>a+(parseFloat(r.price)||0),0);const tax=parseFloat(document.getElementById('inv-tax')?.value)||0;const dep=parseFloat(document.getElementById('inv-deposit')?.value)||0;const cur=document.getElementById('inv-currency')?.value||'KWD';const s=document.getElementById('inv-subtotal');if(s)s.textContent=cur+' '+sub.toFixed(2);const t=document.getElementById('inv-total');if(t)t.textContent=cur+' '+(sub+tax-dep).toFixed(2);}
 async function saveInv(status){const cname=document.getElementById('inv-client-name')?.value.trim();if(!cname){toast('Client name is required','error');return;}const body={num:document.getElementById('inv-num')?.value.trim(),client_id:document.getElementById('inv-client')?.value||null,client_name:cname,client_address:document.getElementById('inv-client-addr')?.value.trim(),client_phone:document.getElementById('inv-client-phone')?.value.trim(),client_fax:document.getElementById('inv-client-fax')?.value.trim(),status,date:document.getElementById('inv-date')?.value,due_date:document.getElementById('inv-due')?.value,due_days:document.getElementById('inv-due-days')?.value||7,currency:document.getElementById('inv-currency')?.value||'KWD',tax:document.getElementById('inv-tax')?.value||0,deposit:document.getElementById('inv-deposit')?.value||0,notes:document.getElementById('inv-notes')?.value.trim(),rows:editInvRows};let r;if(_editInvId){r=await api('PUT',`/api/invoices/${_editInvId}`,body);toast('✅ Invoice updated','success');}else{r=await api('POST','/api/invoices',body);toast('✅ Invoice created','success');}if(r&&r.error){toast(r.error,'error');return;}if(_editInvId)viewInvoice(_editInvId);else showPage('invoices');}
+
+/* QUOTES */
+async function pageQuotes(mc){allQuotes=await api('GET','/api/quotes');mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">Quotes</div><div class="page-sub">${allQuotes.length} quote(s)${currentUser.role==='employe'?' — your quotes only':''}</div></div><div class="header-actions"><button class="btn-new" onclick="showPage('new-quote')"><i class="ti ti-plus"></i> New Quote</button></div></div>
+${currentUser.role==='employe'?`<div class="info-box"><i class="ti ti-info-circle"></i> You can only see your own quotes.</div>`:''}
+<div class="filter-bar"><input type="text" placeholder="Client, number…" id="qt-q" oninput="filterQt()"/><select id="qt-s" onchange="filterQt()"><option value="">All statuses</option><option value="draft">Draft</option><option value="sent">Sent</option><option value="accepted">Accepted</option><option value="refused">Refused</option></select></div>
+<div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Valid until</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody id="qt-tbody">${qtRowsHtml(allQuotes)}</tbody></table></div></div>`;}
+function qtRowsHtml(list){if(!list.length)return`<tr><td colspan="7"><div class="empty-state"><i class="ti ti-file-off"></i><h3>No quotes</h3></div></td></tr>`;return list.map(q=>`<tr><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewQuote(${q.id})">${q.num}</td><td>${q.client_name}</td><td>${fmtDate(q.date)}</td><td>${fmtDate(q.valid_until)}</td><td style="font-weight:700">${fmt(q.total,q.currency)}</td><td>${statusBadge(q.status)}</td><td class="actions-cell"><button class="action-btn danger" onclick="deleteQuote(${q.id})"><i class="ti ti-trash"></i> Delete</button></td></tr>`).join('');}
+function filterQt(){const q=document.getElementById('qt-q')?.value||'';const s=document.getElementById('qt-s')?.value||'';const f=allQuotes.filter(x=>(!q||x.num.toLowerCase().includes(q.toLowerCase())||x.client_name.toLowerCase().includes(q.toLowerCase()))&&(!s||x.status===s));const tb=document.getElementById('qt-tbody');if(tb)tb.innerHTML=qtRowsHtml(f);}
+async function deleteQuote(id){if(!confirm('Delete this quote?'))return;await api('DELETE',`/api/quotes/${id}`);toast('Quote deleted');showPage('quotes');}
+
+async function viewQuote(id){
+  const qt=await api('GET',`/api/quotes/${id}`);
+  const rows=qt.rows||[];
+  const s=settings;
+  const logoHtml=s.company_logo?`<img src="${s.company_logo}" class="inv-logo" alt="Logo"/>`:`<div class="inv-logo-placeholder"><i class="${isCyber()?'ti ti-shield-lock':'ti ti-plane'}"></i></div>`;
+  const L=dl();
+  const mc=document.getElementById('main-content');
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">${qt.num}</div><div class="page-sub">${qt.client_name} — ${statusBadge(qt.status)}</div></div>
+<div class="header-actions">
+  <button class="btn-secondary" onclick="showPage('quotes')"><i class="ti ti-arrow-left"></i> Back</button>
+  ${!qt.converted_invoice_id?`<button class="btn-secondary" onclick="editQuote(${qt.id})"><i class="ti ti-edit"></i> Edit</button>`:''}
+  ${qt.status==='draft'?`<button class="btn-new" onclick="api('PATCH','/api/quotes/${qt.id}/status',{status:'sent'}).then(()=>{toast('✅ Marked as sent','success');viewQuote(${qt.id})})"><i class="ti ti-send"></i> Mark as Sent</button>`:''}
+  ${qt.status==='sent'?`<button class="btn-new" onclick="api('PATCH','/api/quotes/${qt.id}/status',{status:'accepted'}).then(()=>{toast('✅ Marked as accepted','success');viewQuote(${qt.id})})"><i class="ti ti-check"></i> Mark as Accepted</button><button class="btn-unpaid" onclick="api('PATCH','/api/quotes/${qt.id}/status',{status:'refused'}).then(()=>{toast('Marked as refused','error');viewQuote(${qt.id})})"><i class="ti ti-x"></i> Mark as Refused</button>`:''}
+  ${qt.status==='accepted'&&!qt.converted_invoice_id?`<button class="btn-new" onclick="convertQuoteToInvoice(${qt.id})"><i class="ti ti-file-invoice"></i> Convert to Invoice</button>`:''}
+  <button class="btn-secondary" onclick="printQuote()"><i class="ti ti-printer"></i> Print / PDF</button>
+</div></div>
+${qt.converted_invoice_id?`<div class="info-box info-box-paid"><i class="ti ti-circle-check"></i> Converted to invoice <strong style="cursor:pointer;text-decoration:underline" onclick="showPage('invoices');setTimeout(()=>viewInvoice(${qt.converted_invoice_id}),150)">view invoice</strong>.</div>`:''}
+${qt.status==='refused'?`<div class="info-box info-box-unpaid"><i class="ti ti-alert-circle"></i> This quote was refused by the client.</div>`:''}
+<div id="printable"><div class="inv-wrap card">
+  <div class="inv-head">
+    <div class="inv-head-left"><div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px">${logoHtml}<div class="inv-company-name">${s.company_name||''}</div></div></div>
+    <div class="inv-head-right"><div class="inv-title">QUOTE</div><div class="inv-meta-grid"><span class="inv-meta-label">Quote #:</span><span class="inv-meta-val">${qt.num}</span><span class="inv-meta-label">Date:</span><span class="inv-meta-val">${fmtDate(qt.date)}</span>${qt.valid_until?`<span class="inv-meta-label">Valid until:</span><span class="inv-meta-val">${fmtDate(qt.valid_until)}</span>`:''}</div></div>
+  </div>
+  <div class="inv-bill">
+    <div><div class="inv-bill-label">From</div><div class="inv-bill-name">${s.company_name||'—'}</div><div class="inv-bill-meta">${s.company_address||''}<br>P: ${s.company_phone_p||''}<br>M: ${s.company_phone_m||''}<br>${s.company_email||''}</div></div>
+    <div><div class="inv-bill-label">Quote for</div><div class="inv-bill-name">${qt.client_name}</div><div class="inv-bill-meta">${qt.client_address?`Address: ${qt.client_address}`:''}${qt.client_phone?`<br>Phone: ${qt.client_phone}`:''}${qt.client_fax?`<br>Fax: ${qt.client_fax}`:''}</div></div>
+  </div>
+  <div class="inv-pax"><table class="inv-pax-table">
+    <thead><tr><th>${L.colPnr}</th><th>${L.colDest}</th><th>${L.colPassenger}</th><th>${isCyber()?L.colAirline:(rows.some(r=>r.airline==='Hotel')?'Hotel':'Airline')}</th><th>Date</th><th>Price</th></tr></thead>
+    <tbody>${rows.length===0?`<tr><td colspan="6" style="text-align:center;color:#bbb;padding:1.5rem">No rows</td></tr>`:rows.map(r=>`<tr><td><span class="inv-pnr">${r.pnr||'—'}</span></td><td>${r.destination||'—'}</td><td>${r.passenger||'—'}</td><td>${r.airlineRef||r.airline||'—'}</td><td>${r.travel_date||'—'}</td><td>${qt.currency||'KWD'} ${Number(r.price).toLocaleString('en-US',{minimumFractionDigits:2})}</td></tr>`).join('')}</tbody>
+  </table></div>
+  <div class="inv-totals"><div class="inv-totals-inner">
+    <div class="inv-tot-row"><span class="lbl">Subtotal</span><span class="val">${qt.currency||'KWD'} ${Number(qt.subtotal).toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>
+    <div class="inv-tot-row"><span class="lbl">Tax</span><span class="val">${qt.currency||'KWD'} ${qt.tax?Number(qt.tax).toLocaleString('en-US',{minimumFractionDigits:2}):'-'}</span></div>
+    <div class="inv-tot-row inv-tot-final"><span class="lbl"><strong>TOTAL</strong></span><span class="val"><strong>${qt.currency||'KWD'} ${Number(qt.total).toLocaleString('en-US',{minimumFractionDigits:2})}</strong></span></div>
+  </div></div>
+  <div class="inv-foot">
+    <div class="inv-stamp-area"><div><div class="inv-stamp-label">Signature</div>${s.company_signature?`<img src="${s.company_signature}" style="height:70px;margin-top:6px"/>`:'<div style="height:70px"></div>'}</div><div><div class="inv-stamp-label">Stamp</div>${s.company_stamp?`<img src="${s.company_stamp}" style="height:70px;margin-top:6px"/>`:'<div style="height:70px"></div>'}</div></div>
+    <div class="inv-foot-note">${qt.notes?qt.notes.replace(/\n/g,'<br>'):'This quote is valid until the date shown above.'}</div>
+  </div>
+</div></div>`;}
+
+function printQuote(){
+  const content=document.getElementById('printable').innerHTML;
+  const win=window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Quote</title><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#1a1a2e;background:#fff}
+.inv-wrap{padding:0}
+.inv-head{display:flex;justify-content:space-between;align-items:flex-start;padding:24px 30px 16px;border-bottom:3px solid #0a3258}
+.inv-head-left{display:flex;align-items:center;gap:14px}
+.inv-logo{width:80px;height:80px;object-fit:contain}
+.inv-logo-placeholder{width:80px;height:80px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999}
+.inv-company-name{font-size:15px;font-weight:800;color:#0a3258}
+.inv-head-right{text-align:right}
+.inv-title{font-size:44px;font-weight:900;color:#1A6FB5;letter-spacing:.06em;line-height:1;margin-bottom:10px}
+.inv-meta-grid{display:grid;grid-template-columns:auto auto;gap:3px 16px;font-size:11px}
+.inv-meta-label{color:#999;font-weight:700;text-transform:uppercase;font-size:10px;text-align:right}
+.inv-meta-val{color:#1a1a2e;font-weight:600;text-align:left}
+.inv-bill{display:grid;grid-template-columns:1fr 1fr;gap:30px;padding:16px 30px;border-bottom:1px solid #e5eaf2}
+.inv-bill-label{font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+.inv-bill-name{font-size:13px;font-weight:700;color:#0a3258;margin-bottom:3px}
+.inv-bill-meta{font-size:11px;color:#666;line-height:1.7}
+.inv-pax{padding:16px 30px}
+.inv-pax-table{width:100%;border-collapse:collapse;font-size:11.5px}
+.inv-pax-table th{background:#0a3258;color:#fff;padding:9px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;text-align:left}
+.inv-pax-table th:last-child{text-align:right}
+.inv-pax-table td{padding:9px 12px;border-bottom:1px solid #f0f3f8;vertical-align:middle}
+.inv-pax-table td:last-child{text-align:right;font-weight:700}
+.inv-pax-table tbody tr:nth-child(even) td{background:#f9fbff}
+.inv-pax-table tr:last-child td{border-bottom:none}
+.inv-pnr{font-weight:800;color:#0a3258}
+.inv-totals{display:flex;justify-content:flex-end;padding:0 30px 16px}
+.inv-totals-inner{min-width:260px;border:1px solid #e5eaf2;border-radius:6px;overflow:hidden;font-size:12px}
+.inv-tot-row{display:flex;justify-content:space-between;padding:7px 14px;border-bottom:1px solid #f0f3f8}
+.inv-tot-row:last-child{border-bottom:none}
+.inv-tot-row .lbl{color:#888}
+.inv-tot-row .val{font-weight:600;color:#1a1a2e}
+.inv-tot-final{background:#0a3258!important}
+.inv-tot-final .lbl,.inv-tot-final .val{color:#fff!important;font-weight:700}
+.inv-foot{padding:10px 30px 20px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:1rem;border-top:1px solid #e5eaf2}
+.inv-stamp-area{display:flex;gap:60px}
+.inv-stamp-label{font-size:10px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:.04em;margin-bottom:50px}
+.inv-foot-note{font-size:10px;color:#aaa;text-align:right;line-height:1.8;white-space:pre-line}
+@page{margin:10mm;size:A4}
+@media print{body{padding:0}button{display:none!important}}
+  </style></head><body>${content}<script>window.onload=()=>window.print()<\/script></body></html>`);
+  win.document.close();
+}
+
+async function convertQuoteToInvoice(id){
+  if(!confirm('Convert this quote into an invoice? This cannot be undone.'))return;
+  const r=await api('POST',`/api/quotes/${id}/convert`,{});
+  if(r&&r.error){toast(r.error,'error');return;}
+  toast('✅ Converted to invoice '+r.num,'success');
+  showPage('invoices');setTimeout(()=>viewInvoice(r.id),150);
+}
+
+function fillQtClient(sel){const o=sel.querySelector(`option[value="${sel.value}"]`);if(!o||!sel.value)return;[['qt-client-name','name'],['qt-client-addr','addr'],['qt-client-phone','phone'],['qt-client-fax','fax']].forEach(([id,k])=>{const el=document.getElementById(id);if(el)el.value=o.dataset[k]||'';});}
+
+let _editQtId=null;
+async function pageNewQuote(mc){_editQtId=null;editQuoteRows=[{pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0}];[allClients,allItems]=await Promise.all([api('GET','/api/clients'),api('GET','/api/items')]);const{num}=await api('GET','/api/quotes/next-num');renderQtForm(mc,{num,date:today(),valid_until:addDays(today(),14),status:'draft',currency:settings.invoice_currency||'KWD',tax:0});}
+async function editQuote(id){_editQtId=id;const qt=await api('GET',`/api/quotes/${id}`);editQuoteRows=qt.rows&&qt.rows.length?qt.rows.map(r=>({...r,airlineRef:r.airlineRef||''})):[{pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0}];[allClients,allItems]=await Promise.all([api('GET','/api/clients'),api('GET','/api/items')]);const mc=document.getElementById('main-content');document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));renderQtForm(mc,qt);}
+
+function renderQtForm(mc,qt){
+  const currencies=['KWD','USD','EUR','LBP','AED','SAR'];
+  const L=dl();
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">${_editQtId?'Edit Quote':'New Quote'}</div></div><button class="btn-secondary" onclick="showPage('quotes')"><i class="ti ti-arrow-left"></i> Cancel</button></div>
+<div class="card"><div class="card-header"><span class="card-title">Information</span></div><div class="form-grid2" style="gap:14px">
+  <div class="form-group"><label class="form-label">Quote #</label><input class="form-input" id="qt-num" value="${qt.num||''}" ${_editQtId?'readonly style="background:#f5f5f5"':''}/></div>
+  <div class="form-group"><label class="form-label">Currency</label><select class="form-input" id="qt-currency">${currencies.map(c=>`<option ${(qt.currency||'KWD')===c?'selected':''}>${c}</option>`).join('')}</select></div>
+  <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="qt-date" value="${qt.date||today()}"/></div>
+  <div class="form-group"><label class="form-label">Valid until</label><input type="date" class="form-input" id="qt-valid" value="${qt.valid_until||addDays(today(),14)}"/></div>
+</div></div>
+<div class="card"><div class="card-header"><span class="card-title">Client</span></div><div class="form-grid2" style="gap:14px">
+  <div class="form-group"><label class="form-label">Select client</label><select class="form-input" id="qt-client" onchange="fillQtClient(this)"><option value="">-- Select --</option>${allClients.map(c=>`<option value="${c.id}" data-name="${c.name}" data-addr="${c.address||''}" data-phone="${c.phone||''}" data-fax="${c.fax||''}" ${qt.client_id==c.id?'selected':''}>${c.name}</option>`).join('')}</select></div>
+  <div class="form-group"><label class="form-label">Name *</label><input class="form-input" id="qt-client-name" value="${qt.client_name||''}"/></div>
+  <div class="form-group"><label class="form-label">Address</label><input class="form-input" id="qt-client-addr" value="${qt.client_address||''}"/></div>
+  <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="qt-client-phone" value="${qt.client_phone||''}"/></div>
+  <div class="form-group"><label class="form-label">Fax</label><input class="form-input" id="qt-client-fax" value="${qt.client_fax||''}"/></div>
+</div></div>
+<div class="card"><div class="card-header"><span class="card-title">${isCyber()?'Services':'Passengers / Services'}</span></div>
+<div class="pax-table-wrap"><table class="pax-table">
+<colgroup><col style="width:12%"><col style="width:22%"><col style="width:22%"><col style="width:18%"><col style="width:15%"><col style="width:8%"><col style="width:3%"></colgroup>
+<thead><tr><th>${L.colPnr}</th><th>${L.colDest}</th><th>${L.colPassenger}</th><th>${L.colAirline||'Airline'}</th><th>${L.colDate}</th><th>Price</th><th></th></tr></thead>
+<tbody id="qt-rows"></tbody>
+</table></div>
+<button class="btn-add-row" onclick="addQtRow()"><i class="ti ti-plus" style="vertical-align:-2px;margin-right:4px"></i>Add row</button>
+${allItems.length?`<select class="form-input" style="display:inline-block;width:auto;margin-left:10px;font-size:12px;padding:6px 8px" onchange="addRowFromCatalog(editQuoteRows,renderQtRows,this.value);this.value=''"><option value="">+ Add from catalog…</option>${allItems.map(it=>`<option value="${it.id}">${it.name} — ${fmt(it.price,it.currency)}</option>`).join('')}</select>`:''}
+<div class="totals-box"><div class="totals-row"><span>Subtotal</span><span id="qt-subtotal" style="font-weight:700">0.00</span></div><div class="totals-row"><span>Tax</span><input type="number" class="form-input" id="qt-tax" value="${qt.tax||0}" min="0" step="0.01" oninput="calcQtTotal()"/></div><div class="totals-row total-final"><span>TOTAL</span><span id="qt-total" style="font-size:20px">0.00</span></div></div>
+<div class="form-group" style="margin-top:1rem"><label class="form-label">Notes</label><textarea class="form-input" id="qt-notes" rows="2">${qt.notes||''}</textarea></div>
+<div class="form-actions"><button class="btn-secondary" onclick="showPage('quotes')">Cancel</button><button class="btn-save" onclick="saveQt()"><i class="ti ti-device-floppy" style="vertical-align:-2px;margin-right:5px"></i>${_editQtId?'Update Quote':'Save Quote'}</button></div>
+</div>`;renderQtRows();}
+
+function renderQtRows(){const t=document.getElementById('qt-rows');if(!t)return;const L=dl();t.innerHTML=editQuoteRows.map((r,i)=>`<tr>
+<td><input value="${r.pnr||''}" placeholder="${L.phPnr}" oninput="editQuoteRows[${i}].pnr=this.value"/></td>
+<td><input value="${r.destination||''}" placeholder="${L.phDest}" oninput="editQuoteRows[${i}].destination=this.value"/></td>
+<td><input value="${r.passenger||''}" placeholder="${L.phPassenger}" oninput="editQuoteRows[${i}].passenger=this.value"/></td>
+<td><input value="${r.airlineRef||''}" placeholder="${L.phAirline}" oninput="editQuoteRows[${i}].airlineRef=this.value" style="width:100%;padding:5px 7px;font-size:12px;border:1.5px solid #e0e7ef;border-radius:6px;background:#fff;outline:none;color:#1a1a2e"/></td>
+<td><input ${isCyber()?'type="date"':''} value="${r.travel_date||''}" placeholder="${L.phDate}" oninput="editQuoteRows[${i}].travel_date=this.value"/></td>
+<td><input type="number" value="${r.price||0}" min="0" step="0.01" style="text-align:right" oninput="editQuoteRows[${i}].price=parseFloat(this.value)||0;calcQtTotal()"/></td>
+<td><button class="action-btn danger" onclick="removeQtRow(${i})"><i class="ti ti-x"></i></button></td>
+</tr>`).join('');calcQtTotal();}
+function addQtRow(){editQuoteRows.push({pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0});renderQtRows();}
+function removeQtRow(i){if(editQuoteRows.length===1){toast('At least one row required');return;}editQuoteRows.splice(i,1);renderQtRows();}
+function calcQtTotal(){const sub=editQuoteRows.reduce((a,r)=>a+(parseFloat(r.price)||0),0);const tax=parseFloat(document.getElementById('qt-tax')?.value)||0;const cur=document.getElementById('qt-currency')?.value||'KWD';const s=document.getElementById('qt-subtotal');if(s)s.textContent=cur+' '+sub.toFixed(2);const t=document.getElementById('qt-total');if(t)t.textContent=cur+' '+(sub+tax).toFixed(2);}
+async function saveQt(){const cname=document.getElementById('qt-client-name')?.value.trim();if(!cname){toast('Client name is required','error');return;}const body={num:document.getElementById('qt-num')?.value.trim(),client_id:document.getElementById('qt-client')?.value||null,client_name:cname,client_address:document.getElementById('qt-client-addr')?.value.trim(),client_phone:document.getElementById('qt-client-phone')?.value.trim(),client_fax:document.getElementById('qt-client-fax')?.value.trim(),status:'draft',date:document.getElementById('qt-date')?.value,valid_until:document.getElementById('qt-valid')?.value,currency:document.getElementById('qt-currency')?.value||'KWD',tax:document.getElementById('qt-tax')?.value||0,notes:document.getElementById('qt-notes')?.value.trim(),rows:editQuoteRows};let r;if(_editQtId){r=await api('PUT',`/api/quotes/${_editQtId}`,body);toast('✅ Quote updated','success');}else{r=await api('POST','/api/quotes',body);toast('✅ Quote saved','success');}if(r&&r.error){toast(r.error,'error');return;}if(_editQtId)viewQuote(_editQtId);else showPage('quotes');}
 
 /* TICKET SALES */
 async function pageTickets(mc){const tickets=await api('GET','/api/tickets');const L=dl();const cyber=isCyber();const firstDay=new Date(new Date().getFullYear(),0,1).toISOString().split('T')[0];mc.innerHTML=`<div class="page-header"><div><div class="page-title">${L.ticketsTitle}</div><div class="page-sub">${tickets.length} ${cyber?'service(s)':'ticket(s)'}</div></div><div class="header-actions"><button class="btn-new" onclick="showPage('new-ticket')"><i class="ti ti-plus"></i> ${L.newTicketNav}</button><button class="btn-secondary" onclick="showProfitReport()"><i class="ti ti-chart-bar"></i> ${cyber?'Margin Report':'Profit Report'}</button></div></div><div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>#</th><th>${L.passengerHeader}</th><th>${L.airlineHeader}</th><th>${L.colPnr}</th><th>${L.colDest}</th><th>Date</th><th>${L.netLabel}</th><th>${L.sellLabel}</th><th>${cyber?'Margin':'Profit'}</th><th>Status</th><th>Actions</th></tr></thead><tbody>${tickets.length===0?`<tr><td colspan="11"><div class="empty-state"><i class="ti ${cyber?'ti-briefcase':'ti-ticket'}"></i><h3>${cyber?'No services yet':'No tickets'}</h3></div></td></tr>`:tickets.map(t=>`<tr><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewTicket(${t.id})">${t.num}</td><td>${t.passenger||'—'}</td><td>${t.airline||'—'}</td><td>${t.pnr||'—'}</td><td>${t.destination||'—'}</td><td>${fmtDate(t.date)}</td><td>${fmt(t.net_price)}</td><td>${fmt(t.selling_price)}</td><td style="font-weight:700;color:#1a7a3a">${fmt(t.selling_price-t.net_price)}</td><td>${t.status==='paid'?'<span class="badge badge-paid">Paid</span>':'<span class="badge badge-pending">Unpaid</span>'}</td><td class="actions-cell"><button class="action-btn edit" onclick="editTicket(${t.id})"><i class="ti ti-edit"></i> Edit</button><button class="action-btn danger" onclick="deleteTicket(${t.id})"><i class="ti ti-trash"></i> Delete</button></td></tr>`).join('')}</tbody></table></div></div><div id="profit-report-section"></div>`;}
@@ -448,9 +788,96 @@ function printPersonStmt(){
 }
 
 /* PAYMENTS */
-async function pagePayments(mc){const[allPay,allInv]=await Promise.all([api('GET','/api/payments'),api('GET','/api/invoices')]);const paidInv=allInv.filter(i=>i.status==='paid'||i.status==='refunded');const total=paidInv.filter(i=>i.status==='paid').reduce((a,i)=>a+i.total,0);mc.innerHTML=`<div class="page-header"><div><div class="page-title">Payments</div><div class="page-sub">${paidInv.length} invoice(s) — Collected: <strong>${fmt(total)}</strong></div></div></div><div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Total</th><th>Method</th><th>Reference</th><th>Status</th><th>Actions</th></tr></thead><tbody>${paidInv.length===0?`<tr><td colspan="8"><div class="empty-state"><i class="ti ti-cash-off"></i><h3>No paid invoices</h3></div></td></tr>`:paidInv.map(i=>{const pay=allPay.find(p=>p.invoice_id===i.id);const isRefunded=i.status==='refunded';return`<tr style="${isRefunded?'background:#fffbe6':''}"><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewInvoice(${i.id})">${i.num}</td><td>${i.client_name}</td><td>${fmtDate(i.date)}</td><td style="font-weight:700;color:${isRefunded?'#b8860b':'#1a7a3a'}">${fmt(i.total,i.currency)}</td><td>${pay?.method?`<span class="pay-method-badge">${pay.method}</span>`:'—'}</td><td style="color:#aaa">${pay?.reference||'—'}</td><td>${statusBadge(i.status)}</td><td class="actions-cell">${!isRefunded?`<button class="btn-secondary" title="Mark as Refunded" onclick="markRefunded(${i.id})" style="color:#b8860b;border-color:#b8860b;font-size:11px;padding:4px 8px"><i class="ti ti-rotate-clockwise"></i> Refund</button>`:'<span style="background:#fffbe6;color:#b8860b;font-size:11px;font-weight:700;padding:3px 8px;border-radius:5px;border:1px solid #b8860b">✓ Refunded</span>'}<button class="btn-secondary" title="Mark unpaid" onclick="markUnpaidFromList(${i.id})" style="color:#c0392b;border-color:#f5c6c6;font-size:11px;padding:4px 8px"><i class="ti ti-x"></i> Unpaid</button></td></tr>`;}).join('')}</tbody></table></div></div>`;}
+async function pagePayments(mc){const[allPay,allInv]=await Promise.all([api('GET','/api/payments'),api('GET','/api/invoices')]);const paidInv=allInv.filter(i=>i.status==='paid'||i.status==='partial'||i.status==='refunded');const total=allPay.reduce((a,p)=>a+(parseFloat(p.amount)||0),0);mc.innerHTML=`<div class="page-header"><div><div class="page-title">Payments</div><div class="page-sub">${paidInv.length} invoice(s) — Collected: <strong>${fmt(total)}</strong></div></div></div><div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Total</th><th>Paid</th><th>Method</th><th>Status</th><th>Actions</th></tr></thead><tbody>${paidInv.length===0?`<tr><td colspan="8"><div class="empty-state"><i class="ti ti-cash-off"></i><h3>No paid invoices</h3></div></td></tr>`:paidInv.map(i=>{const invPays=allPay.filter(p=>p.invoice_id===i.id);const paidSoFar=invPays.reduce((a,p)=>a+(parseFloat(p.amount)||0),0);const isRefunded=i.status==='refunded';const methodLabel=invPays.length===0?'—':invPays.length===1?`<span class="pay-method-badge">${invPays[0].method}</span>`:`<span class="pay-method-badge">${invPays.length} payments</span>`;return`<tr style="${isRefunded?'background:#fffbe6':''}"><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewInvoice(${i.id})">${i.num}</td><td>${i.client_name}</td><td>${fmtDate(i.date)}</td><td style="font-weight:700;color:${isRefunded?'#b8860b':'#1a7a3a'}">${fmt(i.total,i.currency)}</td><td style="font-weight:700">${fmt(paidSoFar,i.currency)}</td><td>${methodLabel}</td><td>${statusBadge(i.status)}</td><td class="actions-cell">${!isRefunded?`<button class="btn-secondary" title="Mark as Refunded" onclick="markRefunded(${i.id})" style="color:#b8860b;border-color:#b8860b;font-size:11px;padding:4px 8px"><i class="ti ti-rotate-clockwise"></i> Refund</button>`:'<span style="background:#fffbe6;color:#b8860b;font-size:11px;font-weight:700;padding:3px 8px;border-radius:5px;border:1px solid #b8860b">✓ Refunded</span>'}<button class="btn-secondary" title="Mark unpaid" onclick="markUnpaidFromList(${i.id})" style="color:#c0392b;border-color:#f5c6c6;font-size:11px;padding:4px 8px"><i class="ti ti-x"></i> Unpaid</button></td></tr>`;}).join('')}</tbody></table></div></div>`;}
 async function markRefunded(id){if(!confirm('Mark this invoice as refunded?'))return;await api('PATCH',`/api/invoices/${id}/status`,{status:'refunded'});toast('✅ Invoice marked as refunded','success');showPage('payments');}
 async function markUnpaidFromList(id){if(!confirm('Mark this invoice as unpaid?\nThe payment will be deleted.'))return;await api('PATCH',`/api/invoices/${id}/status`,{status:'pending'});toast('Invoice marked as unpaid','error');showPage('payments');}
+
+/* CREDIT NOTES */
+let allCreditNotes=[];
+async function pageCreditNotes(mc){allCreditNotes=await api('GET','/api/credit-notes');mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">Credit Notes</div><div class="page-sub">${allCreditNotes.length} credit note(s)</div></div><button class="btn-new" onclick="openCreditNoteModal()"><i class="ti ti-plus"></i> New Credit Note</button></div>
+<div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Invoice</th><th>Date</th><th>Amount</th><th>Actions</th></tr></thead><tbody>${allCreditNotes.length===0?`<tr><td colspan="6"><div class="empty-state"><i class="ti ti-receipt-refund"></i><h3>No credit notes</h3></div></td></tr>`:allCreditNotes.map(cn=>`<tr><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewCreditNote(${cn.id})">${cn.num}</td><td>${cn.client_name}</td><td>${cn.invoice_num?`<span style="color:#1A6FB5;cursor:pointer" onclick="showPage('invoices');setTimeout(()=>viewInvoice(${cn.invoice_id}),150)">${cn.invoice_num}</span>`:'—'}</td><td>${fmtDate(cn.date)}</td><td style="font-weight:700;color:#b8860b">${fmt(cn.amount,cn.currency)}</td><td class="actions-cell"><button class="action-btn danger" onclick="deleteCreditNote(${cn.id})"><i class="ti ti-trash"></i> Delete</button></td></tr>`).join('')}</tbody></table></div></div>`;}
+
+async function openCreditNoteModal(invoiceId){
+  const invs=await api('GET','/api/invoices');
+  const sel=document.getElementById('cn-invoice');
+  sel.innerHTML='<option value="">-- None / manual entry --</option>'+invs.map(i=>`<option value="${i.id}" data-num="${i.num}" data-client="${i.client_name}" data-total="${i.total}" data-currency="${i.currency||'KWD'}" ${invoiceId==i.id?'selected':''}>${i.num} — ${i.client_name}</option>`).join('');
+  document.getElementById('cn-client').value='';
+  document.getElementById('cn-amount').value='';
+  document.getElementById('cn-currency').value=settings.invoice_currency||'KWD';
+  document.getElementById('cn-date').value=today();
+  document.getElementById('cn-reason').value='';
+  if(invoiceId)fillCnFromInvoice(sel);
+  openModal('modal-cn');
+}
+function fillCnFromInvoice(sel){const o=sel.querySelector(`option[value="${sel.value}"]`);if(!o||!sel.value)return;document.getElementById('cn-client').value=o.dataset.client||'';document.getElementById('cn-amount').value=o.dataset.total||'';document.getElementById('cn-currency').value=o.dataset.currency||'KWD';}
+document.getElementById('btn-save-cn').addEventListener('click',async()=>{
+  const client=document.getElementById('cn-client').value.trim();
+  if(!client){toast('Client name is required','error');return;}
+  const amount=parseFloat(document.getElementById('cn-amount').value)||0;
+  if(amount<=0){toast('Enter an amount greater than 0','error');return;}
+  const sel=document.getElementById('cn-invoice');
+  const o=sel.querySelector(`option[value="${sel.value}"]`);
+  const{num}=await api('GET','/api/credit-notes/next-num');
+  const body={num,invoice_id:sel.value||null,invoice_num:o?.dataset.num||'',client_name:client,date:document.getElementById('cn-date').value,reason:document.getElementById('cn-reason').value.trim(),amount,currency:document.getElementById('cn-currency').value};
+  const r=await api('POST','/api/credit-notes',body);
+  if(r&&r.error){toast(r.error,'error');return;}
+  toast('✅ Credit note issued','success');
+  closeModal('modal-cn');
+  showPage('credit-notes');
+});
+async function deleteCreditNote(id){if(!confirm('Delete this credit note?'))return;await api('DELETE',`/api/credit-notes/${id}`);toast('Credit note deleted');showPage('credit-notes');}
+async function viewCreditNote(id){
+  const cn=await api('GET',`/api/credit-notes/${id}`);
+  const s=settings;
+  const logoHtml=s.company_logo?`<img src="${s.company_logo}" class="inv-logo" alt="Logo"/>`:`<div class="inv-logo-placeholder"><i class="${isCyber()?'ti ti-shield-lock':'ti ti-plane'}"></i></div>`;
+  const mc=document.getElementById('main-content');
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">${cn.num}</div><div class="page-sub">${cn.client_name}</div></div>
+<div class="header-actions"><button class="btn-secondary" onclick="showPage('credit-notes')"><i class="ti ti-arrow-left"></i> Back</button><button class="btn-secondary" onclick="printCreditNote()"><i class="ti ti-printer"></i> Print / PDF</button></div></div>
+<div id="printable"><div class="inv-wrap card">
+  <div class="inv-head">
+    <div class="inv-head-left"><div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px">${logoHtml}<div class="inv-company-name">${s.company_name||''}</div></div></div>
+    <div class="inv-head-right"><div class="inv-title" style="color:#b8860b">CREDIT NOTE</div><div class="inv-meta-grid"><span class="inv-meta-label">Credit note #:</span><span class="inv-meta-val">${cn.num}</span><span class="inv-meta-label">Date:</span><span class="inv-meta-val">${fmtDate(cn.date)}</span>${cn.invoice_num?`<span class="inv-meta-label">Original invoice:</span><span class="inv-meta-val">${cn.invoice_num}</span>`:''}</div></div>
+  </div>
+  <div class="inv-bill">
+    <div><div class="inv-bill-label">From</div><div class="inv-bill-name">${s.company_name||'—'}</div><div class="inv-bill-meta">${s.company_address||''}<br>P: ${s.company_phone_p||''}<br>M: ${s.company_phone_m||''}<br>${s.company_email||''}</div></div>
+    <div><div class="inv-bill-label">Issued to</div><div class="inv-bill-name">${cn.client_name}</div></div>
+  </div>
+  <div class="inv-pax" style="padding:1.25rem 2rem"><div class="inv-bill-label">Reason</div><div style="font-size:13px;color:#333;margin-top:6px">${cn.reason?cn.reason.replace(/\n/g,'<br>'):'—'}</div></div>
+  <div class="inv-totals"><div class="inv-totals-inner">
+    <div class="inv-tot-row inv-tot-final" style="background:#b8860b"><span class="lbl"><strong>CREDIT AMOUNT</strong></span><span class="val"><strong>${cn.currency||'KWD'} ${Number(cn.amount).toLocaleString('en-US',{minimumFractionDigits:2})}</strong></span></div>
+  </div></div>
+</div></div>`;}
+function printCreditNote(){
+  const content=document.getElementById('printable').innerHTML;
+  const win=window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Credit Note</title><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#1a1a2e;background:#fff}
+.inv-wrap{padding:0}
+.inv-head{display:flex;justify-content:space-between;align-items:flex-start;padding:24px 30px 16px;border-bottom:3px solid #0a3258}
+.inv-head-left{display:flex;align-items:center;gap:14px}
+.inv-logo{width:80px;height:80px;object-fit:contain}
+.inv-logo-placeholder{width:80px;height:80px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999}
+.inv-company-name{font-size:15px;font-weight:800;color:#0a3258}
+.inv-head-right{text-align:right}
+.inv-title{font-size:44px;font-weight:900;letter-spacing:.06em;line-height:1;margin-bottom:10px}
+.inv-meta-grid{display:grid;grid-template-columns:auto auto;gap:3px 16px;font-size:11px}
+.inv-meta-label{color:#999;font-weight:700;text-transform:uppercase;font-size:10px;text-align:right}
+.inv-meta-val{color:#1a1a2e;font-weight:600;text-align:left}
+.inv-bill{display:grid;grid-template-columns:1fr 1fr;gap:30px;padding:16px 30px;border-bottom:1px solid #e5eaf2}
+.inv-bill-label{font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+.inv-bill-name{font-size:13px;font-weight:700;color:#0a3258;margin-bottom:3px}
+.inv-totals{display:flex;justify-content:flex-end;padding:16px 30px}
+.inv-totals-inner{min-width:260px;border:1px solid #e5eaf2;border-radius:6px;overflow:hidden;font-size:12px}
+.inv-tot-row{display:flex;justify-content:space-between;padding:10px 14px}
+.inv-tot-final .lbl,.inv-tot-final .val{color:#fff!important;font-weight:700}
+@page{margin:10mm;size:A4}
+@media print{body{padding:0}button{display:none!important}}
+  </style></head><body>${content}<script>window.onload=()=>window.print()<\/script></body></html>`);
+  win.document.close();
+}
 
 /* REPORTS */
 async function pageReports(mc){const firstDay=new Date(new Date().getFullYear(),0,1).toISOString().split('T')[0];mc.innerHTML=`<div class="page-header"><div><div class="page-title">Reports</div><div class="page-sub">Invoice list by period</div></div></div><div class="card"><div class="card-header"><span class="card-title">Period</span></div><div class="filter-bar"><input type="date" id="rpt-from" value="${firstDay}"/><span style="color:#aaa">to</span><input type="date" id="rpt-to" value="${today()}"/><button class="btn-new" onclick="loadReport()"><i class="ti ti-search"></i> Generate</button><button class="btn-secondary" onclick="document.getElementById('rpt-from').value='';document.getElementById('rpt-to').value='';loadReport()">All periods</button></div></div><div id="report-content"><div class="loading-page"><i class="ti ti-loader spin"></i></div></div>`;loadReport();}
@@ -517,13 +944,25 @@ async function pageSettings(mc){const isP=currentUser.role==='patron';const canE
   <div class="form-grid2" style="gap:14px">
     <div class="form-group"><label class="form-label">Currency</label><select class="form-input" id="s-currency" ${!canEdit?'disabled':''}>${currencies.map(c=>`<option ${settings.invoice_currency===c?'selected':''}>${c}</option>`).join('')}</select></div>
     <div class="form-group"><label class="form-label">Payment terms (days)</label><input type="number" class="form-input" id="s-due-days" value="${settings.invoice_due_days||7}" ${!canEdit?'disabled':''}/></div>
+    <div class="form-group"><label class="form-label">Language</label><select class="form-input" id="s-lang" ${!canEdit?'disabled':''} onchange="applyLanguage(this.value)"><option value="en" ${(settings.lang||'en')==='en'?'selected':''}>English</option><option value="fr" ${settings.lang==='fr'?'selected':''}>Français</option><option value="ar" ${settings.lang==='ar'?'selected':''}>العربية</option></select></div>
     <div class="form-group full"><label class="form-label">Invoice footer</label><textarea class="form-input" id="s-footer" rows="3" ${!canEdit?'disabled':''}>${settings.invoice_footer||''}</textarea></div>
   </div>
   ${canEdit?`<button class="btn-save" onclick="saveSettings()">Save Settings</button>`:`<div class="info-box"><i class="ti ti-lock"></i> Only the owner can modify these settings.</div>`}
 </div>
-${isP?`<div class="card" style="max-width:640px"><div class="card-header"><span class="card-title">Users</span><button class="btn-new" onclick="openUserModal()"><i class="ti ti-plus"></i> Add</button></div>${users.map(u=>`<div class="access-row"><div style="display:flex;align-items:center;gap:12px"><div class="user-avatar" style="width:38px;height:38px;font-size:13px;background:${u.role==='patron'?'#deeeff':'#fff4e0'};color:${u.role==='patron'?'#0a3258':'#a05c00'}">${initials(u.display_name)}</div><div><div style="font-size:14px;font-weight:700">${u.display_name}</div><div style="font-size:12px;color:#aaa">${u.username} — ${u.role==='patron'?'Administrator':'Staff'}</div></div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge ${u.role==='patron'?'badge-paid':'badge-pending'}">${u.role==='patron'?'Admin':'Staff'}</span><button class="action-btn" onclick="openUserModal(${u.id})"><i class="ti ti-edit"></i></button>${u.id!==currentUser.id?`<button class="action-btn danger" onclick="deleteUser(${u.id})"><i class="ti ti-trash"></i></button>`:''}</div></div>`).join('')}</div>`:''}`;}
+${canEdit?`<div class="card" style="max-width:640px"><div class="card-header"><span class="card-title"><i class="ti ti-mail" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Email Sending</span></div><p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">Lets you send invoices to clients by email. Use your email provider's SMTP details — for Gmail, that's an <a href="https://support.google.com/accounts/answer/185833" target="_blank" style="color:#1A6FB5">app password</a>, not your normal password.</p><div class="form-grid2" style="gap:14px"><div class="form-group"><label class="form-label">SMTP host</label><input class="form-input" id="s-smtp-host" value="${settings.smtp_host||''}" placeholder="smtp.gmail.com"/></div><div class="form-group"><label class="form-label">Port</label><input type="number" class="form-input" id="s-smtp-port" value="${settings.smtp_port||587}"/></div><div class="form-group"><label class="form-label">Username</label><input class="form-input" id="s-smtp-user" value="${settings.smtp_user||''}" placeholder="you@yourcompany.com"/></div><div class="form-group"><label class="form-label">Password</label><input type="password" class="form-input" id="s-smtp-pass" value="${settings.smtp_pass||''}"/></div><div class="form-group full"><label class="form-label">"From" address <span style="color:#aaa;font-weight:400">(optional, defaults to username)</span></label><input class="form-input" id="s-smtp-from" value="${settings.smtp_from||''}"/></div></div><button class="btn-save" onclick="saveSmtpSettings()">Save Email Settings</button></div>`:''}
+${isP?`<div class="card" style="max-width:640px"><div class="card-header"><span class="card-title">Users</span><button class="btn-new" onclick="openUserModal()"><i class="ti ti-plus"></i> Add</button></div>${users.map(u=>`<div class="access-row"><div style="display:flex;align-items:center;gap:12px"><div class="user-avatar" style="width:38px;height:38px;font-size:13px;background:${u.role==='patron'?'#deeeff':'#fff4e0'};color:${u.role==='patron'?'#0a3258':'#a05c00'}">${initials(u.display_name)}</div><div><div style="font-size:14px;font-weight:700">${u.display_name}</div><div style="font-size:12px;color:#aaa">${u.username} — ${u.role==='patron'?'Administrator':'Staff'}</div></div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge ${u.role==='patron'?'badge-paid':'badge-pending'}">${u.role==='patron'?'Admin':'Staff'}</span><button class="action-btn" onclick="openUserModal(${u.id})"><i class="ti ti-edit"></i></button>${u.id!==currentUser.id?`<button class="action-btn danger" onclick="deleteUser(${u.id})"><i class="ti ti-trash"></i></button>`:''}</div></div>`).join('')}</div>`:''}
+${isP?`<div class="card" style="max-width:640px"><div class="card-header"><span class="card-title"><i class="ti ti-download" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Desktop App</span></div>
+  <p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">Share this link with a client to give them the M&amp;S Cyber Systems desktop app. It installs like any program, opens to a sign-in screen, and logs into their own account — no separate build needed per client.</p>
+  <div style="display:flex;gap:8px;align-items:center">
+    <input class="form-input" id="dl-link" readonly value="${DESKTOP_APP_URL}" style="font-family:monospace;font-size:12px"/>
+    <button class="btn-secondary" onclick="copyDownloadLink()"><i class="ti ti-copy"></i> Copy link</button>
+  </div>
+</div>`:''}`;}
+const DESKTOP_APP_URL='https://github.com/devbxd/dashbaordwhitesky/releases/latest/download/MS-Cyber-Systems-Setup.exe';
+function copyDownloadLink(){const el=document.getElementById('dl-link');el.select();navigator.clipboard.writeText(el.value).then(()=>toast('✅ Link copied','success')).catch(()=>toast('Could not copy — select and copy manually','error'));}
 
-async function saveSettings(){const body={company_name:document.getElementById('s-name')?.value.trim(),company_address:document.getElementById('s-addr')?.value.trim(),company_phone_p:document.getElementById('s-phone-p')?.value.trim(),company_phone_m:document.getElementById('s-phone-m')?.value.trim(),company_email:document.getElementById('s-email')?.value.trim(),invoice_currency:document.getElementById('s-currency')?.value,invoice_due_days:document.getElementById('s-due-days')?.value,invoice_footer:document.getElementById('s-footer')?.value};await api('POST','/api/settings',body);settings=await api('GET','/api/settings');toast('✅ Settings saved','success');}
+async function saveSettings(){const body={company_name:document.getElementById('s-name')?.value.trim(),company_address:document.getElementById('s-addr')?.value.trim(),company_phone_p:document.getElementById('s-phone-p')?.value.trim(),company_phone_m:document.getElementById('s-phone-m')?.value.trim(),company_email:document.getElementById('s-email')?.value.trim(),invoice_currency:document.getElementById('s-currency')?.value,invoice_due_days:document.getElementById('s-due-days')?.value,invoice_footer:document.getElementById('s-footer')?.value,lang:document.getElementById('s-lang')?.value||'en'};await api('POST','/api/settings',body);settings=await api('GET','/api/settings');toast('✅ Settings saved','success');}
+async function saveSmtpSettings(){const body={smtp_host:document.getElementById('s-smtp-host')?.value.trim(),smtp_port:document.getElementById('s-smtp-port')?.value||587,smtp_user:document.getElementById('s-smtp-user')?.value.trim(),smtp_pass:document.getElementById('s-smtp-pass')?.value,smtp_from:document.getElementById('s-smtp-from')?.value.trim()};await api('POST','/api/settings',body);settings=await api('GET','/api/settings');toast('✅ Email settings saved','success');}
 function uploadLogo(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=async(e)=>{await api('POST','/api/settings',{company_logo:e.target.result});settings.company_logo=e.target.result;toast('✅ Logo updated','success');showPage('settings');};reader.readAsDataURL(file);}
 async function removeLogo(){await api('POST','/api/settings',{company_logo:''});settings.company_logo='';toast('Logo removed');showPage('settings');}
 function uploadSignature(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=async(e)=>{await api('POST','/api/settings',{company_signature:e.target.result});settings.company_signature=e.target.result;toast('✅ Signature updated','success');showPage('settings');};reader.readAsDataURL(file);}

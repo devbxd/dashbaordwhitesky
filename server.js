@@ -7,6 +7,7 @@ const { Pool, types } = require('pg');
 const { google } = require('googleapis');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
+const nodemailer = require('nodemailer');
 
 // The live tables predate some of this schema and were created with real DATE/NUMERIC
 // column types (not the TEXT/REAL this file's CREATE TABLE IF NOT EXISTS describes — a
@@ -45,8 +46,8 @@ const isIsolated = (role) => ISOLATED_ROLES.includes(role);
 // key prefix instead of the shared (WhiteSky) settings — so branding/logo/footer never mix.
 const ROLE_SETTINGS_PREFIX = { cyber: 'cyber_' };
 const NUM_PREFIX = {
-  cyber: { inv: 'MSC-', tkt: 'MSC-SVC-' },
-  demo: { inv: 'DEMO-', tkt: 'DEMO-TKT-' },
+  cyber: { inv: 'MSC-', tkt: 'MSC-SVC-', qte: 'MSC-QTE-', cn: 'MSC-CN-' },
+  demo: { inv: 'DEMO-', tkt: 'DEMO-TKT-', qte: 'DEMO-QTE-', cn: 'DEMO-CN-' },
 };
 
 async function query(sql, params = []) {
@@ -153,6 +154,62 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT
+    );
+    CREATE TABLE IF NOT EXISTS quotes (
+      id SERIAL PRIMARY KEY,
+      num TEXT UNIQUE NOT NULL,
+      client_id INTEGER,
+      client_name TEXT,
+      client_address TEXT,
+      client_phone TEXT,
+      client_fax TEXT,
+      status TEXT DEFAULT 'draft',
+      date TEXT,
+      valid_until TEXT,
+      subtotal REAL DEFAULT 0,
+      tax REAL DEFAULT 0,
+      deposit REAL DEFAULT 0,
+      total REAL DEFAULT 0,
+      currency TEXT DEFAULT 'KWD',
+      notes TEXT,
+      owner_id INTEGER,
+      owner_name TEXT,
+      converted_invoice_id INTEGER,
+      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    );
+    CREATE TABLE IF NOT EXISTS quote_rows (
+      id SERIAL PRIMARY KEY,
+      quote_id INTEGER NOT NULL,
+      pnr TEXT,
+      destination TEXT,
+      passenger TEXT,
+      airline TEXT,
+      "airlineRef" TEXT DEFAULT '',
+      travel_date TEXT,
+      price REAL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS items (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      category TEXT,
+      price REAL DEFAULT 0,
+      currency TEXT DEFAULT 'KWD',
+      owner_id INTEGER,
+      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    );
+    CREATE TABLE IF NOT EXISTS credit_notes (
+      id SERIAL PRIMARY KEY,
+      num TEXT UNIQUE NOT NULL,
+      invoice_id INTEGER,
+      invoice_num TEXT,
+      client_name TEXT,
+      date TEXT,
+      reason TEXT,
+      amount REAL DEFAULT 0,
+      currency TEXT DEFAULT 'KWD',
+      owner_id INTEGER,
+      owner_name TEXT,
+      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
     );
   `);
   // Additive migration: lets a 'demo' role own its own clients, fully isolated from real data.
@@ -410,9 +467,10 @@ app.patch('/api/invoices/:id/status', auth, async (req, res) => {
     if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id && !inv.client_id) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     await run('UPDATE invoices SET status=? WHERE id=?', [req.body.status, req.params.id]);
-    // Leaving 'paid' invalidates any recorded payment for this invoice, so the Payments
-    // page and totals never show a payment for an invoice that isn't actually marked paid.
-    if (req.body.status !== 'paid') await run('DELETE FROM payments WHERE invoice_id=?', [req.params.id]);
+    // Leaving 'paid'/'partial' invalidates any recorded payment for this invoice, so the
+    // Payments page and totals never show a payment for an invoice that isn't actually
+    // marked paid or partially paid (e.g. an explicit "mark unpaid" resets it fully).
+    if (req.body.status !== 'paid' && req.body.status !== 'partial') await run('DELETE FROM payments WHERE invoice_id=?', [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -424,6 +482,225 @@ app.delete('/api/invoices/:id', auth, async (req, res) => {
     if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     await run('DELETE FROM invoice_rows WHERE invoice_id=?', [req.params.id]);
     await run('DELETE FROM invoices WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ─── QUOTES ─── */
+app.get('/api/quotes/next-num', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).qte;
+      const last = await queryOne('SELECT num FROM quotes WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
+      if (!last) return res.json({ num: prefix + '001' });
+      const m = last.num.match(/(\d+)$/);
+      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+    }
+    const last = await queryOne('SELECT num FROM quotes ORDER BY id DESC LIMIT 1');
+    if (!last) return res.json({ num: 'QTE-001' });
+    const m = last.num.match(/(\d+)$/);
+    res.json({ num: 'QTE-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/quotes', auth, async (req, res) => {
+  try {
+    let q = 'SELECT * FROM quotes WHERE 1=1'; const p = [];
+    if (req.session.user.role === 'employe') { q += ' AND (owner_id=? OR client_id IS NOT NULL)'; p.push(req.session.user.id); }
+    if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    q += ' ORDER BY created_at DESC';
+    res.json(await query(q, p));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/quotes/:id', auth, async (req, res) => {
+  try {
+    const qt = await queryOne('SELECT * FROM quotes WHERE id=?', [req.params.id]);
+    if (!qt) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id && !qt.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    const rows = await query('SELECT * FROM quote_rows WHERE quote_id=?', [qt.id]);
+    res.json({ ...qt, rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/quotes', auth, async (req, res) => {
+  try {
+    const { num, client_id, client_name, client_address, client_phone, client_fax, status, date, valid_until, tax, deposit, notes, currency, rows } = req.body;
+    const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
+    const taxA = parseFloat(tax) || 0, depA = parseFloat(deposit) || 0;
+    const r = await queryOne(
+      'INSERT INTO quotes (num,client_id,client_name,client_address,client_phone,client_fax,status,date,valid_until,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
+      [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'draft', cleanDate(date), cleanDate(valid_until), sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name]);
+    for (const row of (rows || [])) {
+      await run('INSERT INTO quote_rows (quote_id,pnr,destination,passenger,airline,"airlineRef",travel_date,price) VALUES (?,?,?,?,?,?,?,?)',
+        [r.id, row.pnr || '', row.destination || '', row.passenger || '', row.airline || '', row.airlineRef || '', row.travel_date || '', parseFloat(row.price) || 0]);
+    }
+    res.json({ id: r.id, num });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/quotes/:id', auth, async (req, res) => {
+  try {
+    const qt = await queryOne('SELECT * FROM quotes WHERE id=?', [req.params.id]);
+    if (!qt) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id && !qt.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    const { client_name, client_address, client_phone, client_fax, status, date, valid_until, tax, deposit, notes, currency, rows } = req.body;
+    const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
+    const taxA = parseFloat(tax) || 0, depA = parseFloat(deposit) || 0;
+    await run('UPDATE quotes SET client_name=?,client_address=?,client_phone=?,client_fax=?,status=?,date=?,valid_until=?,subtotal=?,tax=?,deposit=?,total=?,currency=?,notes=? WHERE id=?',
+      [client_name, client_address || '', client_phone || '', client_fax || '', status, cleanDate(date), cleanDate(valid_until), sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.params.id]);
+    await run('DELETE FROM quote_rows WHERE quote_id=?', [req.params.id]);
+    for (const row of (rows || [])) {
+      await run('INSERT INTO quote_rows (quote_id,pnr,destination,passenger,airline,"airlineRef",travel_date,price) VALUES (?,?,?,?,?,?,?,?)',
+        [req.params.id, row.pnr || '', row.destination || '', row.passenger || '', row.airline || '', row.airlineRef || '', row.travel_date || '', parseFloat(row.price) || 0]);
+    }
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.patch('/api/quotes/:id/status', auth, async (req, res) => {
+  try {
+    const qt = await queryOne('SELECT * FROM quotes WHERE id=?', [req.params.id]);
+    if (!qt) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id && !qt.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    await run('UPDATE quotes SET status=? WHERE id=?', [req.body.status, req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/quotes/:id', auth, async (req, res) => {
+  try {
+    const qt = await queryOne('SELECT * FROM quotes WHERE id=?', [req.params.id]);
+    if (!qt) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id && !qt.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    await run('DELETE FROM quote_rows WHERE quote_id=?', [req.params.id]);
+    await run('DELETE FROM quotes WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/quotes/:id/convert', auth, async (req, res) => {
+  try {
+    const qt = await queryOne('SELECT * FROM quotes WHERE id=?', [req.params.id]);
+    if (!qt) return res.status(404).json({ error: 'Introuvable' });
+    if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (qt.converted_invoice_id) return res.status(400).json({ error: 'Already converted' });
+    const rows = await query('SELECT * FROM quote_rows WHERE quote_id=?', [qt.id]);
+
+    const isIso = isIsolated(req.session.user.role);
+    let num;
+    if (isIso) {
+      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).inv;
+      const last = await queryOne('SELECT num FROM invoices WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
+      const m = last ? last.num.match(/(\d+)$/) : null;
+      num = prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
+    } else {
+      const last = await queryOne('SELECT num FROM invoices ORDER BY id DESC LIMIT 1');
+      const m = last ? last.num.match(/(\d+)$/) : null;
+      num = 'FAC-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
+    }
+
+    const r = await queryOne(
+      'INSERT INTO invoices (num,client_id,client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name,verify_token) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
+      [num, qt.client_id || null, qt.client_name, qt.client_address || '', qt.client_phone || '', qt.client_fax || '', 'pending', cleanDate(new Date().toISOString()), null, 7, qt.subtotal, qt.tax, qt.deposit, qt.total, qt.currency || 'KWD', qt.notes || '', req.session.user.id, req.session.user.display_name, crypto.randomBytes(12).toString('hex')]);
+    for (const row of rows) {
+      await run('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,"airlineRef",travel_date,price) VALUES (?,?,?,?,?,?,?,?)',
+        [r.id, row.pnr || '', row.destination || '', row.passenger || '', row.airline || '', row.airlineRef || '', row.travel_date || '', row.price || 0]);
+    }
+    await run("UPDATE quotes SET status='accepted', converted_invoice_id=? WHERE id=?", [r.id, qt.id]);
+    res.json({ id: r.id, num });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ─── ITEM CATALOG (reusable line items) ─── */
+app.get('/api/items', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) return res.json(await query('SELECT * FROM items WHERE owner_id=? ORDER BY name', [req.session.user.id]));
+    res.json(await query('SELECT * FROM items ORDER BY name'));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/items', auth, async (req, res) => {
+  try {
+    const { name, category, price, currency } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name required' });
+    const ownerId = isIsolated(req.session.user.role) ? req.session.user.id : null;
+    const r = await queryOne('INSERT INTO items (name,category,price,currency,owner_id) VALUES (?,?,?,?,?) RETURNING id',
+      [name, category || '', parseFloat(price) || 0, currency || 'KWD', ownerId]);
+    res.json({ id: r.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/items/:id', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const it = await queryOne('SELECT owner_id FROM items WHERE id=?', [req.params.id]);
+      if (!it || it.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    const { name, category, price, currency } = req.body;
+    await run('UPDATE items SET name=?,category=?,price=?,currency=? WHERE id=?', [name, category || '', parseFloat(price) || 0, currency || 'KWD', req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/items/:id', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const it = await queryOne('SELECT owner_id FROM items WHERE id=?', [req.params.id]);
+      if (!it || it.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    await run('DELETE FROM items WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ─── CREDIT NOTES ─── */
+app.get('/api/credit-notes/next-num', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).cn || 'CN-';
+      const last = await queryOne('SELECT num FROM credit_notes WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
+      if (!last) return res.json({ num: prefix + '001' });
+      const m = last.num.match(/(\d+)$/);
+      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+    }
+    const last = await queryOne('SELECT num FROM credit_notes ORDER BY id DESC LIMIT 1');
+    if (!last) return res.json({ num: 'CN-001' });
+    const m = last.num.match(/(\d+)$/);
+    res.json({ num: 'CN-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/credit-notes', auth, async (req, res) => {
+  try {
+    let q = 'SELECT * FROM credit_notes WHERE 1=1'; const p = [];
+    if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    q += ' ORDER BY created_at DESC';
+    res.json(await query(q, p));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/credit-notes/:id', auth, async (req, res) => {
+  try {
+    const cn = await queryOne('SELECT * FROM credit_notes WHERE id=?', [req.params.id]);
+    if (!cn) return res.status(404).json({ error: 'Introuvable' });
+    if (isIsolated(req.session.user.role) && cn.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    res.json(cn);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/credit-notes', auth, async (req, res) => {
+  try {
+    const { num, invoice_id, invoice_num, client_name, date, reason, amount, currency } = req.body;
+    if (invoice_id && isIsolated(req.session.user.role)) {
+      const inv = await queryOne('SELECT owner_id FROM invoices WHERE id=?', [invoice_id]);
+      if (!inv || inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    const r = await queryOne(
+      'INSERT INTO credit_notes (num,invoice_id,invoice_num,client_name,date,reason,amount,currency,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id',
+      [num, invoice_id || null, invoice_num || '', client_name, cleanDate(date), reason || '', parseFloat(amount) || 0, currency || 'KWD', req.session.user.id, req.session.user.display_name]);
+    if (invoice_id) await run("UPDATE invoices SET status='refunded' WHERE id=?", [invoice_id]);
+    res.json({ id: r.id, num });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/credit-notes/:id', auth, async (req, res) => {
+  try {
+    const cn = await queryOne('SELECT * FROM credit_notes WHERE id=?', [req.params.id]);
+    if (!cn) return res.status(404).json({ error: 'Introuvable' });
+    if (isIsolated(req.session.user.role) && cn.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    await run('DELETE FROM credit_notes WHERE id=?', [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -502,6 +779,69 @@ app.delete('/api/tickets/:id', auth, async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/invoices/:id/payments', auth, async (req, res) => {
+  try {
+    const inv = await queryOne('SELECT * FROM invoices WHERE id=?', [req.params.id]);
+    if (!inv) return res.status(404).json({ error: 'Introuvable' });
+    if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    const rows = await query('SELECT * FROM payments WHERE invoice_id=? ORDER BY created_at ASC', [inv.id]);
+    const totalPaid = rows.reduce((a, p) => a + (parseFloat(p.amount) || 0), 0);
+    res.json({ payments: rows, totalPaid, balance: Math.max(0, inv.total - totalPaid) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+async function getScopedSettings(role) {
+  const prefix = ROLE_SETTINGS_PREFIX[role] || '';
+  const rows = await query('SELECT key,value FROM settings');
+  const s = {};
+  rows.forEach(r => {
+    if (prefix) { if (r.key.startsWith(prefix)) s[r.key.slice(prefix.length)] = r.value; }
+    else if (!r.key.startsWith('cyber_')) s[r.key] = r.value;
+  });
+  return s;
+}
+
+app.post('/api/invoices/:id/send-email', auth, async (req, res) => {
+  try {
+    const inv = await queryOne('SELECT * FROM invoices WHERE id=?', [req.params.id]);
+    if (!inv) return res.status(404).json({ error: 'Introuvable' });
+    if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    const { to, message } = req.body;
+    if (!to) return res.status(400).json({ error: 'Recipient email is required' });
+
+    const s = await getScopedSettings(req.session.user.role);
+    if (!s.smtp_host || !s.smtp_user || !s.smtp_pass) {
+      return res.status(400).json({ error: 'Email isn\'t set up yet — add your SMTP details in Settings first.' });
+    }
+    const rows = await query('SELECT * FROM invoice_rows WHERE invoice_id=?', [inv.id]);
+    const transporter = nodemailer.createTransport({
+      host: s.smtp_host, port: parseInt(s.smtp_port) || 587, secure: parseInt(s.smtp_port) === 465,
+      auth: { user: s.smtp_user, pass: s.smtp_pass }
+    });
+
+    const rowsHtml = rows.map(r => `<tr><td style="padding:8px;border-bottom:1px solid #eee">${r.pnr || '—'}</td><td style="padding:8px;border-bottom:1px solid #eee">${r.destination || '—'}</td><td style="padding:8px;border-bottom:1px solid #eee">${r.passenger || '—'}</td><td style="padding:8px;border-bottom:1px solid #eee;text-align:right">${inv.currency} ${Number(r.price).toFixed(2)}</td></tr>`).join('');
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a2e">
+        ${s.company_logo ? `<img src="${s.company_logo}" style="height:56px;margin-bottom:12px"/>` : ''}
+        <h2 style="color:#0a3258;margin:0 0 4px">Invoice ${inv.num}</h2>
+        <p style="color:#888;font-size:13px;margin:0 0 20px">from ${s.company_name || ''}</p>
+        ${message ? `<p style="font-size:14px;line-height:1.6">${String(message).replace(/\n/g, '<br>')}</p>` : ''}
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:16px">
+          <thead><tr style="background:#0a3258;color:#fff"><th style="padding:8px;text-align:left">PNR</th><th style="padding:8px;text-align:left">Destination</th><th style="padding:8px;text-align:left">Passenger</th><th style="padding:8px;text-align:right">Price</th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+        <div style="text-align:right;font-size:18px;font-weight:700;color:#0a3258;margin-top:14px">Total: ${inv.currency} ${Number(inv.total).toFixed(2)}</div>
+        <p style="font-size:12px;color:#aaa;margin-top:24px">Status: ${inv.status.toUpperCase()}</p>
+      </div>`;
+
+    await transporter.sendMail({
+      from: s.smtp_from || s.smtp_user,
+      to, subject: `Invoice ${inv.num} from ${s.company_name || ''}`, html
+    });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: 'Could not send email: ' + e.message }); }
+});
+
 app.get('/api/payments', auth, async (req, res) => {
   try {
     const { from, to } = req.query;
@@ -529,8 +869,16 @@ app.post('/api/payments', auth, async (req, res) => {
     const r = await queryOne(
       'INSERT INTO payments (invoice_id,invoice_num,client_name,amount,method,reference,date,notes) VALUES (?,?,?,?,?,?,?,?) RETURNING id',
       [invoice_id || null, invoice_num, client_name, parseFloat(amount), method, reference || '', date, notes || '']);
-    if (invoice_id) await run("UPDATE invoices SET status='paid' WHERE id=?", [invoice_id]);
-    res.json({ id: r.id });
+    if (invoice_id) {
+      // A payment doesn't have to cover the full balance — e.g. a client paying in two
+      // installments. The invoice is only 'paid' once payments on file add up to the total;
+      // until then it's 'partial' so Payments/Reports can tell the difference from unpaid.
+      const inv = await queryOne('SELECT total FROM invoices WHERE id=?', [invoice_id]);
+      const paidRows = await query('SELECT COALESCE(SUM(amount),0) as total_paid FROM payments WHERE invoice_id=?', [invoice_id]);
+      const totalPaid = parseFloat(paidRows[0].total_paid) || 0;
+      await run('UPDATE invoices SET status=? WHERE id=?', [totalPaid >= inv.total ? 'paid' : 'partial', invoice_id]);
+    }
+    res.json({ id: r.id, totalPaid: invoice_id ? (await queryOne('SELECT COALESCE(SUM(amount),0) as t FROM payments WHERE invoice_id=?', [invoice_id])).t : null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.delete('/api/payments/:id', auth, async (req, res) => {

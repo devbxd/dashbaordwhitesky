@@ -41,6 +41,29 @@ body{font-family:var(--font);background:var(--bg);min-height:100vh;font-size:14p
 button,input,select,textarea{font-family:inherit}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,.nav-item:focus-visible,[onclick]:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 
+/* WELCOME OVERLAY (plays once right after a fresh sign-in) */
+#welcome-overlay{
+  position:fixed;inset:0;z-index:2000;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;
+  background:radial-gradient(circle at 15% 15%,#134a80 0%,transparent 45%),linear-gradient(135deg,#081f38 0%,#0a3258 45%,#1A6FB5 100%);
+  opacity:0;pointer-events:none;transition:opacity .5s ease;
+}
+#welcome-overlay.show{opacity:1;pointer-events:all}
+#welcome-overlay.leaving{opacity:0}
+.welcome-icon{
+  width:84px;height:84px;border-radius:22px;background:rgba(255,255,255,.12);
+  display:flex;align-items:center;justify-content:center;
+  transform:scale(.7);opacity:0;transition:transform .5s cubic-bezier(.2,.8,.2,1),opacity .5s ease;
+}
+#welcome-overlay.show .welcome-icon{transform:scale(1);opacity:1}
+.welcome-icon i{color:#fff;font-size:42px}
+.welcome-text{
+  color:#fff;font-size:22px;font-weight:700;text-align:center;line-height:1.4;
+  opacity:0;transform:translateY(8px);transition:opacity .5s ease .1s,transform .5s ease .1s;
+}
+#welcome-overlay.show .welcome-text{opacity:1;transform:translateY(0)}
+.welcome-text span{font-weight:800;color:#8ecbff}
+
 /* LOGIN */
 #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 15% 15%,#134a80 0%,transparent 45%),linear-gradient(135deg,#081f38 0%,#0a3258 45%,#1A6FB5 100%)}
 .login-card{background:var(--surface);border-radius:var(--radius-lg);padding:2.75rem 2.25rem;width:100%;max-width:380px;box-shadow:var(--shadow-lg);border:1px solid rgba(255,255,255,.6)}
@@ -151,6 +174,7 @@ tbody tr:hover td{background:#f7faff}
 .badge-accepted{background:var(--success-bg);color:var(--success)}
 .badge-refused{background:var(--danger-bg);color:var(--danger)}
 .badge-refunded{background:var(--gold-bg);color:var(--gold)}
+.badge-partial{background:#e8f2fb;color:var(--blue)}
 .badge-vip{background:var(--purple-bg);color:var(--purple)}
 .badge-new{background:#e8f4ff;color:var(--blue)}
 .badge-regular{background:#e8f8ef;color:var(--success)}
@@ -399,4 +423,17 @@ textarea.form-input{resize:vertical;min-height:60px}
   .pax-table-wrap{overflow-x:auto}
   .pax-table{min-width:550px;table-layout:auto}
   .actions-cell{flex-wrap:wrap;gap:3px}
+}
+
+/* RTL (Arabic) — mirrors the sidebar and text direction; the fine-grained layout
+   (tables, forms) stays LTR-structured but reads correctly since text itself flips. */
+html[dir="rtl"] body{direction:rtl}
+html[dir="rtl"] .sidebar{left:auto;right:0}
+html[dir="rtl"] .main-content{margin-left:0;margin-right:225px}
+html[dir="rtl"] .nav-item.active::before{left:auto;right:-.55rem;border-radius:3px 0 0 3px}
+html[dir="rtl"] .sidebar-brand,html[dir="rtl"] .nav-item,html[dir="rtl"] .user-pill{flex-direction:row-reverse}
+html[dir="rtl"] .page-header{flex-direction:row-reverse}
+html[dir="rtl"] .header-actions,html[dir="rtl"] .form-actions,html[dir="rtl"] .modal-actions{flex-direction:row-reverse}
+@media(max-width:768px){
+  html[dir="rtl"] .main-content{margin-right:0}
 }

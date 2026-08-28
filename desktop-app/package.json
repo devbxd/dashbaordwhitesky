@@ -1,0 +1,46 @@
+{
+  "name": "ms-cyber-systems-dashboard",
+  "version": "1.0.0",
+  "description": "M&S Cyber Systems — Dashboard desktop app",
+  "main": "main.js",
+  "author": "M&S Cyber Systems",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.mscybersystems.dashboard",
+    "productName": "M&S Cyber Systems",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "artifactName": "MS-Cyber-Systems-Setup.exe",
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "M&S Cyber Systems"
+    }
+  }
+}

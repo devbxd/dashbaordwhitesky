@@ -12,12 +12,17 @@
 </head>
 <body>
 
+<div id="welcome-overlay" class="hidden">
+  <div class="welcome-icon"><i class="ti ti-shield-lock" id="welcome-icon-i"></i></div>
+  <div class="welcome-text">Welcome back,<br><span id="welcome-name"></span></div>
+</div>
+
 <div id="login-screen">
   <div class="login-card">
     <div class="login-logo">
-      <div class="logo-circle"><i class="ti ti-plane"></i></div>
-      <h1>White Sky Travel Agency</h1>
-      <p>Invoicing System</p>
+      <div class="logo-circle" id="login-logo-circle"><i class="ti ti-shield-lock" id="login-logo-icon"></i></div>
+      <h1 id="login-company-name">M&amp;S Cyber Systems</h1>
+      <p id="login-tagline">Invoicing System</p>
     </div>
     <div class="form-field"><label>Username</label><input type="text" id="login-user" placeholder="patron or employe" autocomplete="username"/></div>
     <div class="form-field"><label>Password</label><input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"/></div>
@@ -37,6 +42,10 @@
         <div class="nav-item active" data-page="dashboard"><i class="ti ti-layout-dashboard"></i><span>Dashboard</span></div>
         <div class="nav-sep">Clients</div>
         <div class="nav-item" data-page="clients"><i class="ti ti-users"></i><span>Clients</span></div>
+        <div class="nav-item" data-page="catalog"><i class="ti ti-tag"></i><span>Catalog</span></div>
+        <div class="nav-sep">Quotes</div>
+        <div class="nav-item" data-page="quotes"><i class="ti ti-file-description"></i><span>Quotes</span></div>
+        <div class="nav-item" data-page="new-quote"><i class="ti ti-file-plus"></i><span>New Quote</span></div>
         <div class="nav-sep">Invoices</div>
         <div class="nav-item" data-page="invoices"><i class="ti ti-file-invoice"></i><span>Invoices</span></div>
         <div class="nav-item" data-page="new-invoice"><i class="ti ti-circle-plus"></i><span>New Invoice</span></div>
@@ -45,6 +54,7 @@
         <div class="nav-item" data-page="new-ticket"><i class="ti ti-ticket"></i><span>New Ticket</span></div>
         <div class="nav-sep">Finance</div>
         <div class="nav-item" data-page="payments"><i class="ti ti-credit-card"></i><span>Payments</span></div>
+        <div class="nav-item" data-page="credit-notes"><i class="ti ti-receipt-refund"></i><span>Credit Notes</span></div>
         <div class="nav-item" data-page="statements"><i class="ti ti-file-text"></i><span>Statements</span></div>
         <div class="nav-item" data-page="reports"><i class="ti ti-chart-bar"></i><span>Reports</span></div>
         <div class="nav-sep">Account</div>
@@ -83,6 +93,53 @@
   </div>
 </div>
 
+<!-- MODAL ITEM (Catalog) -->
+<div class="modal-bg hidden" id="modal-item">
+  <div class="modal-box" style="max-width:420px">
+    <div class="modal-header"><span class="modal-title" id="modal-item-title">New Item</span><button class="modal-close" onclick="closeModal('modal-item')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-item-id"/>
+      <div class="form-group"><label class="form-label">Name *</label><input class="form-input" id="it-name" placeholder="e.g. Web app penetration test"/></div>
+      <div class="form-group"><label class="form-label">Category / notes</label><input class="form-input" id="it-category" placeholder="e.g. Security services"/></div>
+      <div class="modal-grid2">
+        <div class="form-group"><label class="form-label">Default price</label><input type="number" class="form-input" id="it-price" min="0" step="0.01"/></div>
+        <div class="form-group"><label class="form-label">Currency</label><select class="form-input" id="it-currency"><option>KWD</option><option>USD</option><option>EUR</option><option>LBP</option><option>AED</option><option>SAR</option></select></div>
+      </div>
+    </div>
+    <div class="modal-actions"><button class="btn-secondary" onclick="closeModal('modal-item')">Cancel</button><button class="btn-save" id="btn-save-item">Save</button></div>
+  </div>
+</div>
+
+<!-- MODAL CREDIT NOTE -->
+<div class="modal-bg hidden" id="modal-cn">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-header"><span class="modal-title"><i class="ti ti-receipt-refund" style="vertical-align:-2px;margin-right:7px;color:#b8860b"></i>New Credit Note</span><button class="modal-close" onclick="closeModal('modal-cn')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Linked invoice <span style="color:#aaa;font-weight:400">(optional)</span></label><select class="form-input" id="cn-invoice" onchange="fillCnFromInvoice(this)"><option value="">-- None / manual entry --</option></select></div>
+      <div class="form-group"><label class="form-label">Client name *</label><input class="form-input" id="cn-client"/></div>
+      <div class="modal-grid2">
+        <div class="form-group"><label class="form-label">Amount *</label><input type="number" class="form-input" id="cn-amount" min="0" step="0.01"/></div>
+        <div class="form-group"><label class="form-label">Currency</label><select class="form-input" id="cn-currency"><option>KWD</option><option>USD</option><option>EUR</option><option>LBP</option><option>AED</option><option>SAR</option></select></div>
+      </div>
+      <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="cn-date"/></div>
+      <div class="form-group"><label class="form-label">Reason</label><textarea class="form-input" id="cn-reason" rows="2" placeholder="e.g. Trip cancelled, booking error…"></textarea></div>
+    </div>
+    <div class="modal-actions"><button class="btn-secondary" onclick="closeModal('modal-cn')">Cancel</button><button class="btn-save" id="btn-save-cn">Issue Credit Note</button></div>
+  </div>
+</div>
+
+<!-- MODAL EMAIL INVOICE -->
+<div class="modal-bg hidden" id="modal-email">
+  <div class="modal-box" style="max-width:460px">
+    <div class="modal-header"><span class="modal-title"><i class="ti ti-mail" style="vertical-align:-2px;margin-right:7px;color:#1A6FB5"></i>Email Invoice</span><button class="modal-close" onclick="closeModal('modal-email')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Recipient email *</label><input type="email" class="form-input" id="em-to" placeholder="client@email.com"/></div>
+      <div class="form-group"><label class="form-label">Message <span style="color:#aaa;font-weight:400">(optional)</span></label><textarea class="form-input" id="em-message" rows="3" placeholder="A short note to include above the invoice…"></textarea></div>
+    </div>
+    <div class="modal-actions"><button class="btn-secondary" onclick="closeModal('modal-email')">Cancel</button><button class="btn-save" id="btn-send-email"><i class="ti ti-send"></i> Send</button></div>
+  </div>
+</div>
+
 <!-- MODAL PAYMENT -->
 <div class="modal-bg hidden" id="modal-payment">
   <div class="modal-box" style="max-width:420px">
@@ -94,7 +151,13 @@
       <div class="pay-summary">
         <div class="pay-summary-row"><span class="lbl">Invoice</span><span class="val" id="pay-inv-num">—</span></div>
         <div class="pay-summary-row"><span class="lbl">Client</span><span class="val" id="pay-inv-client">—</span></div>
-        <div class="pay-summary-row total"><span class="lbl">Amount due</span><span class="val" id="pay-inv-amount">—</span></div>
+        <div class="pay-summary-row"><span class="lbl">Already paid</span><span class="val" id="pay-inv-already">—</span></div>
+        <div class="pay-summary-row total"><span class="lbl">Balance due</span><span class="val" id="pay-inv-amount">—</span></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Amount received *</label>
+        <input type="number" class="form-input" id="pay-amount" min="0" step="0.01"/>
+        <span style="font-size:11px;color:#aaa">Less than the balance? The invoice will show as Partially Paid.</span>
       </div>
       <div class="form-group">
         <label class="form-label">Payment method *</label>
