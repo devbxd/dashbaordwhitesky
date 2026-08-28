@@ -330,6 +330,9 @@ textarea.form-input{resize:vertical;min-height:60px}
 .inv-stamp-area{display:flex;gap:4rem}
 .inv-stamp-label{font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:50px}
 .inv-foot-note{font-size:11px;color:var(--text-mute);text-align:right;line-height:1.8;white-space:pre-line}
+.inv-qr{text-align:center}
+.inv-qr img{width:64px;height:64px;display:block}
+.inv-qr-caption{font-size:9px;color:var(--text-mute);text-transform:uppercase;letter-spacing:.04em;margin-top:4px;font-weight:700}
 
 /* SETTINGS */
 .settings-label{font-size:11px;font-weight:800;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.75rem;margin-top:1.5rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)}

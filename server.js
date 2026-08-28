@@ -5,6 +5,8 @@ const bcrypt = require('bcryptjs');
 const path = require('path');
 const { Pool, types } = require('pg');
 const { google } = require('googleapis');
+const crypto = require('crypto');
+const QRCode = require('qrcode');
 
 // The live tables predate some of this schema and were created with real DATE/NUMERIC
 // column types (not the TEXT/REAL this file's CREATE TABLE IF NOT EXISTS describes — a
@@ -16,6 +18,7 @@ types.setTypeParser(1082, val => val); // date -> 'YYYY-MM-DD' string
 types.setTypeParser(1700, val => parseFloat(val)); // numeric -> number
 
 const app = express();
+app.set('trust proxy', 1); // behind Render's proxy — needed so req.protocol reports https, not http
 const PORT = process.env.PORT || 3000;
 const SHEET_ID = '1gPYfTzGNpV7B_i2sv87p88EGmAN5uvQB58AsEr4lZWY';
 
@@ -163,6 +166,13 @@ async function initDB() {
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS amount REAL DEFAULT 0;
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS date TEXT;
   `);
+  // QR-code authenticity check: each invoice gets a random, unguessable token (not the
+  // sequential invoice number) so /verify/:token can't be walked to snoop on other clients.
+  await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS verify_token TEXT`);
+  const untokened = await query('SELECT id FROM invoices WHERE verify_token IS NULL');
+  for (const inv of untokened) {
+    await run('UPDATE invoices SET verify_token=? WHERE id=?', [crypto.randomBytes(12).toString('hex'), inv.id]);
+  }
 
   const defaultSettings = {
     company_name: 'WHITE SKY TRAVEL AGENCY',
@@ -354,7 +364,9 @@ app.get('/api/invoices/:id', auth, async (req, res) => {
     if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id && !inv.client_id) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     const rows = await query('SELECT * FROM invoice_rows WHERE invoice_id=?', [inv.id]);
-    res.json({ ...inv, rows });
+    const verifyUrl = `${req.protocol}://${req.get('host')}/verify/${inv.verify_token}`;
+    const qrDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 160, color: { dark: '#0a3258' } });
+    res.json({ ...inv, rows, verify_url: verifyUrl, qr_data_url: qrDataUrl });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/invoices', auth, async (req, res) => {
@@ -363,8 +375,8 @@ app.post('/api/invoices', auth, async (req, res) => {
     const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
     const taxA = parseFloat(tax) || 0, depA = parseFloat(deposit) || 0;
     const r = await queryOne(
-      'INSERT INTO invoices (num,client_id,client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'pending', cleanDate(date), cleanDate(due_date), due_days || 7, sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name]);
+      'INSERT INTO invoices (num,client_id,client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name,verify_token) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
+      [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'pending', cleanDate(date), cleanDate(due_date), due_days || 7, sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name, crypto.randomBytes(12).toString('hex')]);
     for (const row of (rows || [])) {
       await run('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,"airlineRef",travel_date,price) VALUES (?,?,?,?,?,?,?,?)',
         [r.id, row.pnr || '', row.destination || '', row.passenger || '', row.airline || '', row.airlineRef || '', row.travel_date || '', parseFloat(row.price) || 0]);
@@ -695,6 +707,67 @@ function scheduleBackup() {
   }, msUntilMidnight);
   console.log(`⏰ Prochain backup dans ${Math.round(msUntilMidnight / 1000 / 60)} minutes`);
 }
+
+/* ─── PUBLIC INVOICE VERIFICATION (QR code target — no auth, reachable by anyone with the link) ─── */
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+app.get('/verify/:token', async (req, res) => {
+  try {
+    const inv = await queryOne('SELECT * FROM invoices WHERE verify_token=?', [req.params.token]);
+    const shell = (bodyHtml) => `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Invoice Verification</title><style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:'Segoe UI',Arial,sans-serif;background:#EEF2F8;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;color:#1a1a2e}
+      .card{background:#fff;border-radius:16px;box-shadow:0 10px 40px rgba(10,40,70,.12);max-width:420px;width:100%;padding:2rem;text-align:center}
+      .icon{width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;font-size:30px}
+      h1{font-size:18px;margin-bottom:.25rem}
+      .sub{font-size:13px;color:#888;margin-bottom:1.5rem}
+      .row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f0f3f8;font-size:13.5px;text-align:left}
+      .row:last-child{border-bottom:none}
+      .row .k{color:#888}
+      .row .v{font-weight:700;color:#1a1a2e}
+      .foot{margin-top:1.5rem;font-size:11px;color:#bbb}
+    </style></head><body><div class="card">${bodyHtml}</div></body></html>`;
+
+    if (!inv) {
+      return res.status(404).send(shell(`
+        <div class="icon" style="background:#fdecea;color:#b71c1c">✕</div>
+        <h1>Not a recognized invoice</h1>
+        <div class="sub">This QR code doesn't match any invoice on file. If you received this from someone claiming to represent us, please contact us directly to confirm.</div>
+      `));
+    }
+
+    const owner = inv.owner_id ? await queryOne('SELECT role FROM users WHERE id=?', [inv.owner_id]) : null;
+    const prefix = ROLE_SETTINGS_PREFIX[owner?.role] || '';
+    const settingsRows = await query('SELECT key,value FROM settings');
+    const s = {};
+    settingsRows.forEach(r => {
+      if (prefix) { if (r.key.startsWith(prefix)) s[r.key.slice(prefix.length)] = r.value; }
+      else if (!r.key.startsWith('cyber_')) s[r.key] = r.value;
+    });
+    const companyName = s.company_name || 'WhiteSky Travel Agency';
+
+    res.send(shell(`
+      <div class="icon" style="background:#e6f9ee;color:#1a7a3a">✓</div>
+      <h1>Authentic invoice</h1>
+      <div class="sub">Issued and on file with ${escapeHtml(companyName)}</div>
+      <div class="row"><span class="k">Invoice #</span><span class="v">${escapeHtml(inv.num)}</span></div>
+      <div class="row"><span class="k">Billed to</span><span class="v">${escapeHtml(inv.client_name)}</span></div>
+      <div class="row"><span class="k">Date</span><span class="v">${escapeHtml(inv.date)}</span></div>
+      <div class="row"><span class="k">Amount</span><span class="v">${escapeHtml(inv.currency)} ${Number(inv.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
+      <div class="row"><span class="k">Status</span><span class="v">${escapeHtml((inv.status || '').toUpperCase())}</span></div>
+      <div class="foot">Scanned from the QR code printed on the invoice · ${escapeHtml(companyName)}</div>
+    `));
+  } catch (e) { res.status(500).send('Verification error'); }
+});
+// JSON form of the same check, for anything that wants to verify programmatically.
+app.get('/api/verify/:token', async (req, res) => {
+  try {
+    const inv = await queryOne('SELECT num,client_name,date,total,currency,status FROM invoices WHERE verify_token=?', [req.params.token]);
+    if (!inv) return res.status(404).json({ authentic: false });
+    res.json({ authentic: true, ...inv });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 

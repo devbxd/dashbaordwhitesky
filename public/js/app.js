@@ -159,7 +159,7 @@ ${inv.status==='pending'||inv.status==='overdue'?`<div class="info-box info-box-
     <div class="inv-tot-row inv-tot-final"><span class="lbl"><strong>TOTAL</strong></span><span class="val"><strong>${inv.currency||'KWD'} ${Number(inv.total).toLocaleString('en-US',{minimumFractionDigits:2})}</strong></span></div>
   </div></div>
   <div class="inv-foot">
-    <div class="inv-stamp-area"><div><div class="inv-stamp-label">Signature</div>${s.company_signature?`<img src="${s.company_signature}" style="height:70px;margin-top:6px"/>`:(isCyber()?`<div style="height:70px;display:flex;flex-direction:column;justify-content:flex-end"><div style="font-family:'Segoe Script','Brush Script MT',cursive;font-size:24px;color:#0a3258">Boudy Hajj</div><div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:.05em;border-top:1px solid #ccc;margin-top:3px;padding-top:3px">Boudy Hajj — CEO, M&amp;S Cyber Systems</div></div>`:'<div style="height:70px"></div>')}</div><div><div class="inv-stamp-label">Stamp</div>${s.company_stamp?`<img src="${s.company_stamp}" style="height:70px;margin-top:6px"/>`:'<div style="height:70px"></div>'}</div></div>
+    <div class="inv-stamp-area"><div><div class="inv-stamp-label">Signature</div>${s.company_signature?`<img src="${s.company_signature}" style="height:70px;margin-top:6px"/>`:(isCyber()?`<div style="height:70px;display:flex;flex-direction:column;justify-content:flex-end"><div style="font-family:'Segoe Script','Brush Script MT',cursive;font-size:24px;color:#0a3258">Boudy Hajj</div><div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:.05em;border-top:1px solid #ccc;margin-top:3px;padding-top:3px">Boudy Hajj — CEO, M&amp;S Cyber Systems</div></div>`:'<div style="height:70px"></div>')}</div><div><div class="inv-stamp-label">Stamp</div>${s.company_stamp?`<img src="${s.company_stamp}" style="height:70px;margin-top:6px"/>`:'<div style="height:70px"></div>'}</div>${inv.qr_data_url?`<div class="inv-qr"><img src="${inv.qr_data_url}" alt="Verification QR code"/><div class="inv-qr-caption">Scan to verify</div></div>`:''}</div>
     <div class="inv-foot-note">${(s.invoice_footer||'Total due in 07 days.').replace(/\n/g,'<br>')}</div>
   </div>
 </div></div>`;}
@@ -206,6 +206,9 @@ body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#1a1a2e;backgr
 .inv-foot{padding:10px 30px 20px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:1rem;border-top:1px solid #e5eaf2}
 .inv-stamp-area{display:flex;gap:60px}
 .inv-stamp-label{font-size:10px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:.04em;margin-bottom:50px}
+.inv-qr{text-align:center}
+.inv-qr img{width:64px;height:64px;display:block}
+.inv-qr-caption{font-size:8px;color:#aaa;text-transform:uppercase;letter-spacing:.04em;margin-top:4px;font-weight:700}
 .inv-foot-note{font-size:10px;color:#aaa;text-align:right;line-height:1.8;white-space:pre-line}
 @page{margin:10mm;size:A4}
 @media print{
