@@ -113,9 +113,9 @@ function invRowsHtml(list){if(!list.length)return`<tr><td colspan="8"><div class
 function filterInv(){const q=document.getElementById('inv-q')?.value||'';const s=document.getElementById('inv-s')?.value||'';const from=document.getElementById('inv-from')?.value||'';const to=document.getElementById('inv-to')?.value||'';const f=allInvoices.filter(i=>(!q||i.num.toLowerCase().includes(q.toLowerCase())||i.client_name.toLowerCase().includes(q.toLowerCase()))&&(!s||i.status===s)&&(!from||i.date>=from)&&(!to||i.date<=to));const tb=document.getElementById('inv-tbody');if(tb)tb.innerHTML=invRowsHtml(f);}
 
 /* MODAL PAYMENT */
-let _payInvId=null;
-async function openPayModal(id){_payInvId=id;const inv=await api('GET',`/api/invoices/${id}`);document.getElementById('pay-inv-num').textContent=inv.num;document.getElementById('pay-inv-client').textContent=inv.client_name;document.getElementById('pay-inv-amount').textContent=fmt(inv.total,inv.currency);document.getElementById('pay-method').value='Cash';document.getElementById('pay-reference').value='';document.getElementById('pay-notes').value='';openModal('modal-payment');}
-document.getElementById('btn-confirm-pay').addEventListener('click',async()=>{if(!_payInvId)return;const method=document.getElementById('pay-method').value;const reference=document.getElementById('pay-reference').value.trim();const notes=document.getElementById('pay-notes').value.trim();await api('PATCH',`/api/invoices/${_payInvId}/status`,{status:'paid',method,reference,notes});closeModal('modal-payment');toast('✅ Payment recorded','success');const active=document.querySelector('.nav-item.active');const page=active?active.dataset.page:'invoices';if(page==='dashboard')showPage('dashboard');else showPage('invoices');});
+let _payInvId=null,_payInv=null;
+async function openPayModal(id){_payInvId=id;const inv=await api('GET',`/api/invoices/${id}`);_payInv=inv;document.getElementById('pay-inv-num').textContent=inv.num;document.getElementById('pay-inv-client').textContent=inv.client_name;document.getElementById('pay-inv-amount').textContent=fmt(inv.total,inv.currency);document.getElementById('pay-method').value='Cash';document.getElementById('pay-reference').value='';document.getElementById('pay-notes').value='';openModal('modal-payment');}
+document.getElementById('btn-confirm-pay').addEventListener('click',async()=>{if(!_payInvId||!_payInv)return;const method=document.getElementById('pay-method').value;const reference=document.getElementById('pay-reference').value.trim();const notes=document.getElementById('pay-notes').value.trim();const r=await api('POST','/api/payments',{invoice_id:_payInvId,invoice_num:_payInv.num,client_name:_payInv.client_name,amount:_payInv.total,method,reference,date:today(),notes});if(r&&r.error){toast(r.error,'error');return;}closeModal('modal-payment');toast('✅ Payment recorded','success');const active=document.querySelector('.nav-item.active');const page=active?active.dataset.page:'invoices';if(page==='dashboard')showPage('dashboard');else showPage('invoices');});
 async function markUnpaid(id){if(!confirm('Mark this invoice as unpaid?\nThe associated payment will be deleted.'))return;await api('PATCH',`/api/invoices/${id}/status`,{status:'pending'});toast('Invoice marked as unpaid','error');viewInvoice(id);}
 async function deleteInvoice(id){if(!confirm('Delete this invoice?'))return;await api('DELETE',`/api/invoices/${id}`);toast('Invoice deleted');showPage('invoices');}
 
@@ -451,7 +451,35 @@ async function markUnpaidFromList(id){if(!confirm('Mark this invoice as unpaid?\
 
 /* REPORTS */
 async function pageReports(mc){const firstDay=new Date(new Date().getFullYear(),0,1).toISOString().split('T')[0];mc.innerHTML=`<div class="page-header"><div><div class="page-title">Reports</div><div class="page-sub">Invoice list by period</div></div></div><div class="card"><div class="card-header"><span class="card-title">Period</span></div><div class="filter-bar"><input type="date" id="rpt-from" value="${firstDay}"/><span style="color:#aaa">to</span><input type="date" id="rpt-to" value="${today()}"/><button class="btn-new" onclick="loadReport()"><i class="ti ti-search"></i> Generate</button><button class="btn-secondary" onclick="document.getElementById('rpt-from').value='';document.getElementById('rpt-to').value='';loadReport()">All periods</button></div></div><div id="report-content"><div class="loading-page"><i class="ti ti-loader spin"></i></div></div>`;loadReport();}
-async function loadReport(){const from=document.getElementById('rpt-from')?.value;const to=document.getElementById('rpt-to')?.value;let url='/api/invoices';const p=[];if(from)p.push('from='+from);if(to)p.push('to='+to);if(p.length)url+='?'+p.join('&');const list=await api('GET',url);const rc=document.getElementById('report-content');if(!rc)return;const total=list.reduce((a,i)=>a+i.total,0);rc.innerHTML=`<div class="card" style="padding:0;overflow:hidden"><div class="card-header" style="padding:1rem 1.25rem"><span class="card-title">${list.length} invoice(s) — Total: <strong>${fmt(total)}</strong></span></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Due</th><th>Total</th><th>Status</th><th>Created by</th></tr></thead><tbody>${list.length===0?`<tr><td colspan="7"><div class="empty-state"><i class="ti ti-file-off"></i><h3>No invoices for this period</h3></div></td></tr>`:list.map(i=>`<tr><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewInvoice(${i.id})">${i.num}</td><td>${i.client_name}</td><td>${fmtDate(i.date)}</td><td>${fmtDate(i.due_date)}</td><td style="font-weight:700">${fmt(i.total,i.currency)}</td><td>${statusBadge(i.status)}</td><td style="color:#aaa;font-size:12px">${i.owner_name||'—'}</td></tr>`).join('')}</tbody></table></div></div>`;}
+async function loadReport(){
+  const from=document.getElementById('rpt-from')?.value;
+  const to=document.getElementById('rpt-to')?.value;
+  const qs=[];if(from)qs.push('from='+from);if(to)qs.push('to='+to);
+  const q=qs.length?'?'+qs.join('&'):'';
+  const[list,rpt]=await Promise.all([api('GET','/api/invoices'+q),api('GET','/api/reports/summary'+q)]);
+  const rc=document.getElementById('report-content');if(!rc)return;
+  const total=list.reduce((a,i)=>a+i.total,0);
+
+  const months=Object.keys(rpt.byMonth||{}).sort();
+  const maxMonth=Math.max(1,...months.map(m=>rpt.byMonth[m]));
+  const monthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const chartHtml=months.length===0?`<div class="empty-state" style="padding:2rem"><i class="ti ti-chart-bar"></i><h3>No revenue data for this period</h3></div>`:`<div class="month-chart">${months.map(m=>{const val=rpt.byMonth[m]||0;const h=Math.round((val/maxMonth)*100);const[y,mo]=m.split('-');return`<div class="month-bar-wrap" title="${fmt(val)}"><div class="month-val">${val>=1000?(val/1000).toFixed(1)+'k':Math.round(val)}</div><div class="month-bar" style="height:${Math.max(h,2)}%"></div><div class="month-label">${monthNames[parseInt(mo,10)-1]} ${y.slice(2)}</div></div>`;}).join('')}</div>`;
+
+  const topClients=rpt.topClients||[];
+  const topClientsHtml=topClients.length===0?'':`<table class="top-clients-table" style="width:100%;border-collapse:collapse">${topClients.map(([name,amt],idx)=>`<tr><td style="width:26px;color:#bbb;font-weight:700">#${idx+1}</td><td style="font-weight:600">${name}</td><td style="text-align:right;font-weight:700;color:#0a3258">${fmt(amt)}</td></tr>`).join('')}</table>`;
+
+  rc.innerHTML=`
+<div class="reports-grid">
+  <div class="card">
+    <div class="card-header"><span class="card-title"><i class="ti ti-chart-histogram" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Revenue by month</span></div>
+    ${chartHtml}
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title"><i class="ti ti-crown" style="vertical-align:-2px;margin-right:6px;color:#a05c00"></i>Top clients</span></div>
+    ${topClientsHtml||`<div class="empty-state" style="padding:2rem"><i class="ti ti-users"></i><h3>No client data yet</h3></div>`}
+  </div>
+</div>
+<div class="card" style="padding:0;overflow:hidden"><div class="card-header" style="padding:1rem 1.25rem"><span class="card-title">${list.length} invoice(s) — Total: <strong>${fmt(total)}</strong></span></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Due</th><th>Total</th><th>Status</th><th>Created by</th></tr></thead><tbody>${list.length===0?`<tr><td colspan="7"><div class="empty-state"><i class="ti ti-file-off"></i><h3>No invoices for this period</h3></div></td></tr>`:list.map(i=>`<tr><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewInvoice(${i.id})">${i.num}</td><td>${i.client_name}</td><td>${fmtDate(i.date)}</td><td>${fmtDate(i.due_date)}</td><td style="font-weight:700">${fmt(i.total,i.currency)}</td><td>${statusBadge(i.status)}</td><td style="color:#aaa;font-size:12px">${i.owner_name||'—'}</td></tr>`).join('')}</tbody></table></div></div>`;}
 
 /* SETTINGS */
 async function pageSettings(mc){const isP=currentUser.role==='patron';const canEdit=isP||isCyber();settings=await api('GET','/api/settings');let users=[];if(isP)users=await api('GET','/api/users');const currencies=['KWD','USD','EUR','LBP','AED','SAR'];mc.innerHTML=`<div class="page-header"><div><div class="page-title">Settings</div></div></div>

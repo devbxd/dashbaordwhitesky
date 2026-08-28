@@ -3,8 +3,17 @@ const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const path = require('path');
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const { google } = require('googleapis');
+
+// The live tables predate some of this schema and were created with real DATE/NUMERIC
+// column types (not the TEXT/REAL this file's CREATE TABLE IF NOT EXISTS describes — a
+// no-op on tables that already exist). Left alone, pg hands back DATE as a JS Date
+// (silently shifting by a day around UTC midnight) and NUMERIC as a string (turning every
+// `+ total` into string concatenation instead of a sum). Parsing both as plain values here
+// fixes it everywhere at once instead of patching every call site.
+types.setTypeParser(1082, val => val); // date -> 'YYYY-MM-DD' string
+types.setTypeParser(1700, val => parseFloat(val)); // numeric -> number
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -145,6 +154,15 @@ async function initDB() {
   `);
   // Additive migration: lets a 'demo' role own its own clients, fully isolated from real data.
   await pool.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS owner_id INTEGER`);
+  // The live 'payments' table was created before invoice_num/client_name/amount/date existed
+  // in this schema — CREATE TABLE IF NOT EXISTS silently skipped adding them, so every
+  // payment ever recorded through the app was failing at the database level.
+  await pool.query(`
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_num TEXT;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS client_name TEXT;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS amount REAL DEFAULT 0;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS date TEXT;
+  `);
 
   const defaultSettings = {
     company_name: 'WHITE SKY TRAVEL AGENCY',
@@ -380,6 +398,9 @@ app.patch('/api/invoices/:id/status', auth, async (req, res) => {
     if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id && !inv.client_id) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     await run('UPDATE invoices SET status=? WHERE id=?', [req.body.status, req.params.id]);
+    // Leaving 'paid' invalidates any recorded payment for this invoice, so the Payments
+    // page and totals never show a payment for an invoice that isn't actually marked paid.
+    if (req.body.status !== 'paid') await run('DELETE FROM payments WHERE invoice_id=?', [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
