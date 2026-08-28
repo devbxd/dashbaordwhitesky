@@ -247,8 +247,13 @@ function renderInvForm(mc,inv){
 <div class="card"><div class="card-header"><span class="card-title">Information</span></div><div class="form-grid2" style="gap:14px">
   <div class="form-group"><label class="form-label">Invoice #</label><input class="form-input" id="inv-num" value="${inv.num||''}" ${_editInvId?'readonly style="background:#f5f5f5"':''}/></div>
   <div class="form-group"><label class="form-label">Currency</label><select class="form-input" id="inv-currency">${currencies.map(c=>`<option ${(inv.currency||'KWD')===c?'selected':''}>${c}</option>`).join('')}</select></div>
+  ${isCyber()?`
+  <div class="form-group"><label class="form-label">Delivery Date</label><input type="date" class="form-input" id="inv-date" value="${inv.date||today()}" oninput="document.getElementById('inv-due').value=addDays(this.value,parseInt(document.getElementById('inv-due-days').value)||0)"/></div>
+  <input type="hidden" id="inv-due" value="${inv.due_date||inv.date||today()}"/>
+  `:`
   <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="inv-date" value="${inv.date||today()}"/></div>
   <div class="form-group"><label class="form-label">Due Date</label><input type="date" class="form-input" id="inv-due" value="${inv.due_date||addDays(today(),7)}"/></div>
+  `}
   <div class="form-group"><label class="form-label">Status</label><select class="form-input" id="inv-status"><option value="draft" ${inv.status==='draft'?'selected':''}>Draft</option><option value="pending" ${inv.status==='pending'?'selected':''}>Pending</option><option value="paid" ${inv.status==='paid'?'selected':''}>Paid</option><option value="overdue" ${inv.status==='overdue'?'selected':''}>Overdue</option></select></div>
   <div class="form-group"><label class="form-label">Payment terms (days)</label><input type="number" class="form-input" id="inv-due-days" value="${inv.due_days||7}" min="1" oninput="document.getElementById('inv-due').value=addDays(document.getElementById('inv-date').value,parseInt(this.value)||7)"/></div>
 </div></div>
