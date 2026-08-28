@@ -223,6 +223,19 @@ async function initDB() {
   `);
   // Additive migration: lets a 'demo' role own its own clients, fully isolated from real data.
   await pool.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS owner_id INTEGER`);
+  // Lets the patron deactivate any account (self-registered clients included) from the
+  // new Admin page — a deactivated account is blocked right at login, not mid-session.
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS invites (
+      code TEXT PRIMARY KEY,
+      used BOOLEAN DEFAULT false,
+      created_by INTEGER,
+      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
+      used_by INTEGER,
+      used_at TEXT
+    );
+  `);
   // The live 'payments' table was created before invoice_num/client_name/amount/date existed
   // in this schema — CREATE TABLE IF NOT EXISTS silently skipped adding them, so every
   // payment ever recorded through the app was failing at the database level.
@@ -319,6 +332,7 @@ app.post('/api/login', async (req, res) => {
   try {
     const u = await queryOne('SELECT * FROM users WHERE username=?', [req.body.username]);
     if (!u || !bcrypt.compareSync(req.body.password, u.password)) return res.json({ success: false, error: 'Identifiants incorrects' });
+    if (u.active === false) return res.json({ success: false, error: 'Your account is not available. Contact +961 71 335 614 on WhatsApp.' });
     req.session.user = { id: u.id, username: u.username, role: u.role, display_name: u.display_name };
     res.json({ success: true, user: req.session.user });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -331,7 +345,18 @@ app.get('/api/me', (req, res) => res.json({ user: req.session.user || null }));
 // own branding), seeded with sane defaults so their invoices aren't blank on day one.
 app.post('/api/signup', async (req, res) => {
   try {
-    const { username, password, display_name, company_name } = req.body;
+    const { username, password, display_name, company_name, client, invite_code } = req.body;
+    // Only the desktop app is allowed to self-register — the plain website never shows
+    // this option, and this check stops someone from calling the endpoint directly too.
+    if (client !== 'desktop') return res.status(403).json({ error: 'Account creation is only available from the desktop app.' });
+    // The download link itself is just a public file with no limit — anyone can share it
+    // with anyone. The real one-signup-per-person control is this code: the patron hands
+    // out one single-use invite code per prospect (separately from the download link), and
+    // it's consumed the moment an account is created with it. No valid, unused code = no signup.
+    if (!invite_code) return res.status(400).json({ error: 'An invite code is required — ask the person who sent you this app for one.' });
+    const invite = await queryOne('SELECT * FROM invites WHERE code=?', [String(invite_code).trim().toUpperCase()]);
+    if (!invite) return res.status(400).json({ error: 'Invalid invite code.' });
+    if (invite.used) return res.status(400).json({ error: 'This invite code has already been used.' });
     if (!username || !password || !display_name) return res.status(400).json({ error: 'All fields are required' });
     if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
     const existing = await queryOne('SELECT id FROM users WHERE username=?', [username]);
@@ -339,6 +364,8 @@ app.post('/api/signup', async (req, res) => {
 
     const r = await queryOne('INSERT INTO users (username,password,role,display_name) VALUES (?,?,?,?) RETURNING id',
       [username, bcrypt.hashSync(password, 10), 'client', display_name]);
+    await run('UPDATE invites SET used=true, used_by=?, used_at=? WHERE code=?',
+      [r.id, new Date().toISOString(), invite.code]);
     const prefix = `client${r.id}_`;
     const seed = {
       company_name: company_name || display_name,
@@ -983,7 +1010,32 @@ app.get('/api/reports/summary', auth, async (req, res) => {
 });
 
 app.get('/api/users', patron, async (req, res) => {
-  try { res.json(await query('SELECT id,username,role,display_name FROM users')); }
+  try { res.json(await query('SELECT id,username,role,display_name,active FROM users ORDER BY id')); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.patch('/api/users/:id/active', patron, async (req, res) => {
+  try {
+    if (req.params.id == req.session.user.id) return res.status(400).json({ error: "You can't deactivate your own account" });
+    await run('UPDATE users SET active=? WHERE id=?', [!!req.body.active, req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* Invite codes — one single-use code per prospect, generated and handed out (WhatsApp,
+   etc.) separately from the download link, so sharing the .exe alone can't mint accounts. */
+app.get('/api/invites', patron, async (req, res) => {
+  try { res.json(await query('SELECT invites.*, u.display_name as used_by_name FROM invites LEFT JOIN users u ON u.id=invites.used_by ORDER BY invites.created_at DESC')); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/invites', patron, async (req, res) => {
+  try {
+    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    await run('INSERT INTO invites (code,created_by) VALUES (?,?)', [code, req.session.user.id]);
+    res.json({ code });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/invites/:code', patron, async (req, res) => {
+  try { await run('DELETE FROM invites WHERE code=? AND used=false', [req.params.code]); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/users', patron, async (req, res) => {

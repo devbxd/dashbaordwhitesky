@@ -184,7 +184,17 @@ function cacheLoginBranding(){
   }catch(e){}
 }
 applyLoginBrandingFromCache();
-async function init(){const{user}=await api('GET','/api/me');settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);if(user){currentUser=user;cacheLoginBranding();showApp();showPage('dashboard');}else{document.getElementById('login-screen').style.display='flex';translateNode(document.getElementById('login-screen'));}}
+// Self-signup is only offered inside the desktop app (main.js loads the page with
+// ?client=desktop) — the plain website never shows it, so a random visitor can't just
+// register themselves. And even inside the app, it's a one-shot: once this particular
+// install has been used to create an account, it hides itself for good (localStorage is
+// private per Electron install, so this doesn't affect other people's copies of the app).
+function signupAllowedHere(){
+  const isDesktopApp=new URLSearchParams(location.search).get('client')==='desktop';
+  if(!isDesktopApp)return false;
+  try{return !localStorage.getItem('signupUsed');}catch(e){return true;}
+}
+async function init(){const{user}=await api('GET','/api/me');settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);if(user){currentUser=user;cacheLoginBranding();showApp();showPage('dashboard');}else{document.getElementById('login-screen').style.display='flex';if(signupAllowedHere())document.getElementById('signup-toggle-hint').classList.remove('hidden');translateNode(document.getElementById('login-screen'));}}
 document.getElementById('btn-login').addEventListener('click',doLogin);
 ['login-user','login-pass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();}));
 async function doLogin(){const btn=document.getElementById('btn-login');const err=document.getElementById('login-error');btn.textContent='…';btn.disabled=true;const data=await api('POST','/api/login',{username:document.getElementById('login-user').value.trim(),password:document.getElementById('login-pass').value});btn.textContent='Sign In';btn.disabled=false;if(data.success){currentUser=data.user;err.style.display='none';settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);cacheLoginBranding();await playWelcome(currentUser.display_name,currentUser.role==='cyber');showApp();showPage('dashboard');}else{err.textContent=data.error||'Invalid credentials';err.style.display='block';}}
@@ -195,19 +205,22 @@ function toggleAuthMode(mode){
   document.getElementById('login-error').style.display='none';
 }
 document.getElementById('btn-signup').addEventListener('click',doSignup);
-['su-display','su-company','su-user','su-pass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')doSignup();}));
+['su-invite','su-display','su-company','su-user','su-pass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')doSignup();}));
 async function doSignup(){
+  if(!signupAllowedHere())return;
   const btn=document.getElementById('btn-signup');const err=document.getElementById('login-error');
+  const invite_code=document.getElementById('su-invite').value.trim();
   const display_name=document.getElementById('su-display').value.trim();
   const company_name=document.getElementById('su-company').value.trim();
   const username=document.getElementById('su-user').value.trim();
   const password=document.getElementById('su-pass').value;
-  if(!display_name||!username||!password){err.textContent='Please fill in all fields';err.style.display='block';return;}
+  if(!invite_code||!display_name||!username||!password){err.textContent='Please fill in all fields';err.style.display='block';return;}
   btn.textContent='…';btn.disabled=true;
-  const data=await api('POST','/api/signup',{username,password,display_name,company_name});
+  const data=await api('POST','/api/signup',{username,password,display_name,company_name,client:'desktop',invite_code});
   btn.textContent='Create Account';btn.disabled=false;
   if(data.success){
     currentUser=data.user;err.style.display='none';
+    try{localStorage.setItem('signupUsed','1');}catch(e){}
     settings=await api('GET','/api/settings').catch(()=>({}));
     applyLanguage(settings.lang);cacheLoginBranding();
     await playWelcome(currentUser.display_name,false);
@@ -243,11 +256,14 @@ function applyBranding(){
   const tIcon=document.querySelector('.nav-item[data-page="tickets"] i');if(tIcon)tIcon.className=cyber?'ti ti-briefcase':'ti ti-ticket';
   const ntSpan=document.querySelector('.nav-item[data-page="new-ticket"] span');if(ntSpan)ntSpan.textContent=labels.newTicketNav;
   const ntIcon=document.querySelector('.nav-item[data-page="new-ticket"] i');if(ntIcon)ntIcon.className=cyber?'ti ti-briefcase':'ti ti-ticket';
+  const isPatron=currentUser&&currentUser.role==='patron';
+  document.getElementById('admin-nav-item')?.classList.toggle('hidden',!isPatron);
+  document.getElementById('admin-sep')?.classList.toggle('hidden',!isPatron);
 }
 
 /* NAV */
 document.querySelectorAll('.nav-item[data-page]').forEach(item=>item.addEventListener('click',()=>showPage(item.dataset.page)));
-function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML='<div class="loading-page"><i class="ti ti-loader spin"></i> Loading…</div>';const pages={dashboard:pageDashboard,clients:pageClients,catalog:pageCatalog,quotes:pageQuotes,'new-quote':pageNewQuote,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,payments:pagePayments,'credit-notes':pageCreditNotes,statements:pageStatements,reports:pageReports,settings:pageSettings};if(pages[page])pages[page](mc);}
+function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML='<div class="loading-page"><i class="ti ti-loader spin"></i> Loading…</div>';const pages={dashboard:pageDashboard,clients:pageClients,catalog:pageCatalog,quotes:pageQuotes,'new-quote':pageNewQuote,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,payments:pagePayments,'credit-notes':pageCreditNotes,statements:pageStatements,reports:pageReports,settings:pageSettings,admin:pageAdmin};if(pages[page])pages[page](mc);}
 
 /* DASHBOARD */
 async function pageDashboard(mc){const[invData,rpt]=await Promise.all([api('GET','/api/invoices'),api('GET','/api/reports/summary')]);allInvoices=invData;const out=allInvoices.filter(i=>i.status!=='paid'&&i.status!=='draft');mc.innerHTML=`
@@ -980,14 +996,8 @@ async function pageSettings(mc){const isP=currentUser.role==='patron';const canE
 </div>
 ${canEdit?`<div class="card" style="max-width:640px"><div class="card-header"><span class="card-title"><i class="ti ti-mail" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Email Sending</span></div><p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">Lets you send invoices to clients by email. Use your email provider's SMTP details — for Gmail, that's an <a href="https://support.google.com/accounts/answer/185833" target="_blank" style="color:#1A6FB5">app password</a>, not your normal password.</p><div class="form-grid2" style="gap:14px"><div class="form-group"><label class="form-label">SMTP host</label><input class="form-input" id="s-smtp-host" value="${settings.smtp_host||''}" placeholder="smtp.gmail.com"/></div><div class="form-group"><label class="form-label">Port</label><input type="number" class="form-input" id="s-smtp-port" value="${settings.smtp_port||587}"/></div><div class="form-group"><label class="form-label">Username</label><input class="form-input" id="s-smtp-user" value="${settings.smtp_user||''}" placeholder="you@yourcompany.com"/></div><div class="form-group"><label class="form-label">Password</label><input type="password" class="form-input" id="s-smtp-pass" value="${settings.smtp_pass||''}"/></div><div class="form-group full"><label class="form-label">"From" address <span style="color:#aaa;font-weight:400">(optional, defaults to username)</span></label><input class="form-input" id="s-smtp-from" value="${settings.smtp_from||''}"/></div></div><button class="btn-save" onclick="saveSmtpSettings()">Save Email Settings</button></div>`:''}
 ${isP?`<div class="card" style="max-width:640px"><div class="card-header"><span class="card-title">Users</span><button class="btn-new" onclick="openUserModal()"><i class="ti ti-plus"></i> Add</button></div>${users.map(u=>`<div class="access-row"><div style="display:flex;align-items:center;gap:12px"><div class="user-avatar" style="width:38px;height:38px;font-size:13px;background:${u.role==='patron'?'#deeeff':'#fff4e0'};color:${u.role==='patron'?'#0a3258':'#a05c00'}">${initials(u.display_name)}</div><div><div style="font-size:14px;font-weight:700">${u.display_name}</div><div style="font-size:12px;color:#aaa">${u.username} — ${u.role==='patron'?'Administrator':'Staff'}</div></div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge ${u.role==='patron'?'badge-paid':'badge-pending'}">${u.role==='patron'?'Admin':'Staff'}</span><button class="action-btn" onclick="openUserModal(${u.id})"><i class="ti ti-edit"></i></button>${u.id!==currentUser.id?`<button class="action-btn danger" onclick="deleteUser(${u.id})"><i class="ti ti-trash"></i></button>`:''}</div></div>`).join('')}</div>`:''}
-${isP?`<div class="card" style="max-width:640px"><div class="card-header"><span class="card-title"><i class="ti ti-download" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Desktop App</span></div>
-  <p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">Share this link with a client to give them the M&amp;S Cyber Systems desktop app. It installs like any program, opens to a sign-in screen, and logs into their own account — no separate build needed per client.</p>
-  <div style="display:flex;gap:8px;align-items:center">
-    <input class="form-input" id="dl-link" readonly value="${DESKTOP_APP_URL}" style="font-family:monospace;font-size:12px"/>
-    <button class="btn-secondary" onclick="copyDownloadLink()"><i class="ti ti-copy"></i> Copy link</button>
-  </div>
-</div>`:''}`;}
-const DESKTOP_APP_URL='https://github.com/devbxd/dashbaordwhitesky/releases/latest/download/MS-Cyber-Systems-Setup.exe';
+`;}
+const DESKTOP_APP_URL='https://github.com/devbxd/dashbaordwhitesky/releases/latest/download/Invoices-Dashboard-Setup.exe';
 function copyDownloadLink(){const el=document.getElementById('dl-link');el.select();navigator.clipboard.writeText(el.value).then(()=>toast('✅ Link copied','success')).catch(()=>toast('Could not copy — select and copy manually','error'));}
 
 async function saveSettings(){const body={company_name:document.getElementById('s-name')?.value.trim(),company_address:document.getElementById('s-addr')?.value.trim(),company_phone_p:document.getElementById('s-phone-p')?.value.trim(),company_phone_m:document.getElementById('s-phone-m')?.value.trim(),company_email:document.getElementById('s-email')?.value.trim(),invoice_currency:document.getElementById('s-currency')?.value,invoice_due_days:document.getElementById('s-due-days')?.value,invoice_footer:document.getElementById('s-footer')?.value,lang:document.getElementById('s-lang')?.value||'en'};await api('POST','/api/settings',body);settings=await api('GET','/api/settings');toast('✅ Settings saved','success');}
@@ -1003,6 +1013,42 @@ async function removeStamp(){await api('POST','/api/settings',{company_stamp:''}
 function openUserModal(id){const isEdit=!!id;document.getElementById('modal-user-title').textContent=isEdit?'Edit User':'New User';document.getElementById('edit-user-id').value=id||'';document.getElementById('btn-save-user').textContent=isEdit?'Update':'Create';document.getElementById('u-pass-hint').style.display=isEdit?'':'none';document.getElementById('u-display').value='';document.getElementById('u-username').value='';document.getElementById('u-password').value='';document.getElementById('u-role').value='employe';document.getElementById('u-username').disabled=!!isEdit;openModal('modal-user');}
 document.getElementById('btn-save-user').addEventListener('click',async()=>{const id=document.getElementById('edit-user-id').value;const body={display_name:document.getElementById('u-display').value.trim(),username:document.getElementById('u-username').value.trim(),password:document.getElementById('u-password').value,role:document.getElementById('u-role').value};if(!id&&(!body.username||!body.password)){toast('All fields are required','error');return;}const r=id?await api('PUT',`/api/users/${id}`,body):await api('POST','/api/users',body);if(r&&r.error){toast(r.error,'error');return;}closeModal('modal-user');toast('✅ User '+(id?'updated':'created'),'success');showPage('settings');});
 async function deleteUser(id){if(!confirm('Delete this user?'))return;await api('DELETE',`/api/users/${id}`);toast('User deleted');showPage('settings');}
+
+/* ADMIN (patron only) */
+async function pageAdmin(mc){
+  const[users,invites]=await Promise.all([api('GET','/api/users'),api('GET','/api/invites')]);
+  const roleLabel={patron:'Administrator',employe:'Staff',demo:'Demo',cyber:'CEO (Cyber)',client:'Client (self-registered)'};
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">Admin</div><div class="page-sub">Download link, invite codes and account access — visible to the owner only</div></div></div>
+<div class="card" style="max-width:680px"><div class="card-header"><span class="card-title"><i class="ti ti-download" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Download Link</span></div>
+  <p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">Share this link with anyone — it's just the app installer, downloading it doesn't create an account by itself. Send it as many times as you like.</p>
+  <div style="display:flex;gap:8px;align-items:center">
+    <input class="form-input" id="dl-link" readonly value="${DESKTOP_APP_URL}" style="font-family:monospace;font-size:12px"/>
+    <button class="btn-secondary" onclick="copyDownloadLink()"><i class="ti ti-copy"></i> Copy link</button>
+  </div>
+</div>
+<div class="card" style="max-width:680px"><div class="card-header"><span class="card-title"><i class="ti ti-key" style="vertical-align:-2px;margin-right:6px;color:#b8860b"></i>Invite Codes</span><button class="btn-new" onclick="generateInvite()"><i class="ti ti-plus"></i> Generate Code</button></div>
+  <p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">This is the actual access control — give one code per prospect (WhatsApp, etc.), separately from the download link. Each code creates exactly one account, then it's dead.</p>
+  ${invites.length===0?`<div class="empty-state" style="padding:2rem"><i class="ti ti-key"></i><h3>No codes generated yet</h3></div>`:`<table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Code</th><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Status</th><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Used by</th><th></th></tr></thead><tbody>${invites.map(inv=>`<tr><td style="padding:6px 4px;font-family:monospace;font-weight:700">${inv.code}</td><td style="padding:6px 4px">${inv.used?'<span class="badge badge-draft">Used</span>':'<span class="badge badge-paid">Unused</span>'}</td><td style="padding:6px 4px;color:#888;font-size:12px">${inv.used_by_name||'—'}</td><td style="padding:6px 4px;text-align:right">${inv.used?'':`<button class="action-btn" onclick="copyInviteCode('${inv.code}')" title="Copy"><i class="ti ti-copy"></i></button><button class="action-btn danger" onclick="deleteInvite('${inv.code}')" title="Revoke"><i class="ti ti-trash"></i></button>`}</td></tr>`).join('')}</tbody></table>`}
+</div>
+<div class="card" style="max-width:680px;padding:0;overflow:hidden"><div class="card-header" style="padding:1.25rem 1.25rem 0"><span class="card-title"><i class="ti ti-users-group" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>All Accounts</span></div>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>${users.map(u=>`<tr><td style="font-weight:700">${u.display_name}</td><td style="color:#888">${u.username}</td><td>${roleLabel[u.role]||u.role}</td><td>${u.active===false?'<span class="badge badge-refused">Deactivated</span>':'<span class="badge badge-paid">Active</span>'}</td><td class="actions-cell">${u.id===currentUser.id?'<span style="color:#ccc;font-size:12px">(you)</span>':u.active===false?`<button class="btn-secondary" style="font-size:11px;padding:4px 8px;color:#1a7a3a;border-color:#a3d9b1" onclick="toggleUserActive(${u.id},true)"><i class="ti ti-check"></i> Activate</button>`:`<button class="btn-secondary" style="font-size:11px;padding:4px 8px;color:#c0392b;border-color:#f5c6c6" onclick="toggleUserActive(${u.id},false)"><i class="ti ti-ban"></i> Deactivate</button>`}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+async function toggleUserActive(id,active){
+  if(!active&&!confirm('Deactivate this account? They will be blocked from signing in until you reactivate it.'))return;
+  const r=await api('PATCH',`/api/users/${id}/active`,{active});
+  if(r&&r.error){toast(r.error,'error');return;}
+  toast(active?'✅ Account activated':'Account deactivated','success');
+  showPage('admin');
+}
+async function generateInvite(){
+  const r=await api('POST','/api/invites',{});
+  if(r&&r.error){toast(r.error,'error');return;}
+  showPage('admin');
+  setTimeout(()=>{navigator.clipboard.writeText(r.code).catch(()=>{});toast(`✅ Code ${r.code} generated and copied`,'success');},150);
+}
+function copyInviteCode(code){navigator.clipboard.writeText(code).then(()=>toast(`✅ Copied ${code}`,'success')).catch(()=>toast('Could not copy','error'));}
+async function deleteInvite(code){if(!confirm('Revoke this unused code?'))return;await api('DELETE',`/api/invites/${code}`);toast('Code revoked');showPage('admin');}
 
 
 

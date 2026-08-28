@@ -5,7 +5,9 @@ const fs = require('fs');
 // The desktop app is a branded shell around the live dashboard — it never bundles the
 // web app's own code. Whatever runs on the server is what every install shows, so a
 // server-side fix or feature reaches every desktop user without them installing anything.
-const TARGET_URL = 'https://dashbaordwhitesky-7fw2.onrender.com/';
+// The ?client=desktop marker is how the web page tells the difference between "opened in
+// the desktop app" and "opened in a plain browser" — self-signup only shows up here.
+const TARGET_URL = 'https://dashbaordwhitesky-7fw2.onrender.com/?client=desktop';
 
 const configPath = path.join(app.getPath('userData'), 'config.json');
 function loadConfig() {
@@ -71,7 +73,7 @@ function createWindow() {
     height: 900,
     minWidth: 1000,
     minHeight: 640,
-    title: 'M&S Cyber Systems',
+    title: 'Invoices Dashboard',
     icon: path.join(__dirname, 'build', 'icon.ico'),
     backgroundColor: '#EEF2F8',
     webPreferences: {
