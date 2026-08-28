@@ -140,7 +140,7 @@ ${inv.status==='paid'?`<div class="info-box info-box-paid"><i class="ti ti-circl
 ${inv.status==='pending'||inv.status==='overdue'?`<div class="info-box info-box-unpaid"><i class="ti ti-alert-circle"></i> This invoice has not been paid yet.</div>`:''}
 <div id="printable"><div class="inv-wrap card">
   <div class="inv-head">
-    <div class="inv-head-left">${logoHtml}</div>
+    <div class="inv-head-left"><div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px">${logoHtml}<div class="inv-company-name">${s.company_name||''}</div></div></div>
     <div class="inv-head-right"><div class="inv-title">INVOICE</div><div class="inv-meta-grid"><span class="inv-meta-label">Invoice #:</span><span class="inv-meta-val">${inv.num}</span><span class="inv-meta-label">Invoice date:</span><span class="inv-meta-val">${fmtDate(inv.date)}</span>${inv.due_date?`<span class="inv-meta-label">Due date:</span><span class="inv-meta-val">${fmtDate(inv.due_date)}</span>`:''}</div></div>
   </div>
   <div class="inv-bill">
@@ -176,6 +176,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#1a1a2e;backgr
 .inv-logo{width:80px;height:80px;object-fit:contain}
 .inv-logo-placeholder{width:80px;height:80px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999}
 .inv-agency-name{font-size:13px;font-weight:700;color:#0a3258;letter-spacing:.04em}
+.inv-company-name{font-size:15px;font-weight:800;color:#0a3258}
 .inv-head-right{text-align:right}
 .inv-title{font-size:44px;font-weight:900;color:#1A6FB5;letter-spacing:.06em;line-height:1;margin-bottom:10px}
 .inv-meta-grid{display:grid;grid-template-columns:auto auto;gap:3px 16px;font-size:11px}
