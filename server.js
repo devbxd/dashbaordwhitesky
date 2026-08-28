@@ -40,14 +40,23 @@ function cleanDate(d) {
 
 // Isolated roles: each owns its own clients/invoices/tickets/payments, fully separated
 // from the shared WhiteSky data and from each other (owner_id scoping).
-const ISOLATED_ROLES = ['demo', 'cyber'];
+// 'client' = self-registered tenants (see POST /api/signup) — every signup gets its own
+// isolated sandbox automatically, no manual account creation needed.
+const ISOLATED_ROLES = ['demo', 'cyber', 'client'];
 const isIsolated = (role) => ISOLATED_ROLES.includes(role);
-// Per-role settings namespace: a role in this map reads/writes settings under its own
-// key prefix instead of the shared (WhiteSky) settings — so branding/logo/footer never mix.
-const ROLE_SETTINGS_PREFIX = { cyber: 'cyber_' };
+// Settings namespace: 'cyber' is a single fixed account so it gets a fixed prefix; 'client'
+// covers potentially many self-registered tenants, so each one is namespaced by their own
+// user id instead — otherwise every self-registered agency would share one branding.
+function settingsPrefix(user) {
+  if (!user) return '';
+  if (user.role === 'cyber') return 'cyber_';
+  if (user.role === 'client') return `client${user.id}_`;
+  return '';
+}
 const NUM_PREFIX = {
   cyber: { inv: 'MSC-', tkt: 'MSC-SVC-', qte: 'MSC-QTE-', cn: 'MSC-CN-' },
   demo: { inv: 'DEMO-', tkt: 'DEMO-TKT-', qte: 'DEMO-QTE-', cn: 'DEMO-CN-' },
+  client: { inv: 'INV-', tkt: 'TKT-', qte: 'QTE-', cn: 'CN-' },
 };
 
 async function query(sql, params = []) {
@@ -317,15 +326,47 @@ app.post('/api/login', async (req, res) => {
 app.post('/api/logout', (req, res) => { req.session.destroy(); res.json({ success: true }); });
 app.get('/api/me', (req, res) => res.json({ user: req.session.user || null }));
 
+// Self-service signup — anyone with the app/link creates their own account, no manual
+// provisioning needed. Each signup becomes its own isolated 'client' tenant (own data,
+// own branding), seeded with sane defaults so their invoices aren't blank on day one.
+app.post('/api/signup', async (req, res) => {
+  try {
+    const { username, password, display_name, company_name } = req.body;
+    if (!username || !password || !display_name) return res.status(400).json({ error: 'All fields are required' });
+    if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    const existing = await queryOne('SELECT id FROM users WHERE username=?', [username]);
+    if (existing) return res.status(400).json({ error: 'That username is already taken' });
+
+    const r = await queryOne('INSERT INTO users (username,password,role,display_name) VALUES (?,?,?,?) RETURNING id',
+      [username, bcrypt.hashSync(password, 10), 'client', display_name]);
+    const prefix = `client${r.id}_`;
+    const seed = {
+      company_name: company_name || display_name,
+      invoice_currency: 'KWD',
+      invoice_due_days: '7',
+      invoice_footer: `Please make all checks payable to ${company_name || display_name}.`,
+    };
+    for (const [k, v] of Object.entries(seed)) {
+      await pool.query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING', [prefix + k, v]);
+    }
+    req.session.user = { id: r.id, username, role: 'client', display_name };
+    res.json({ success: true, user: req.session.user });
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes('duplicate')) return res.status(400).json({ error: 'That username is already taken' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+const OTHER_PREFIX_RE = /^(cyber_|client\d+_)/;
 app.get('/api/settings', auth, async (req, res) => {
   try {
-    const prefix = ROLE_SETTINGS_PREFIX[req.session.user.role] || '';
+    const prefix = settingsPrefix(req.session.user);
     const rows = await query('SELECT key,value FROM settings');
     const s = {};
     rows.forEach(r => {
       if (prefix) {
         if (r.key.startsWith(prefix)) s[r.key.slice(prefix.length)] = r.value;
-      } else if (!r.key.startsWith('cyber_')) {
+      } else if (!OTHER_PREFIX_RE.test(r.key)) {
         s[r.key] = r.value;
       }
     });
@@ -335,8 +376,8 @@ app.get('/api/settings', auth, async (req, res) => {
 app.post('/api/settings', auth, async (req, res) => {
   try {
     const role = req.session.user.role;
-    if (role !== 'patron' && role !== 'cyber') return res.status(403).json({ error: 'Réservé au patron' });
-    const prefix = ROLE_SETTINGS_PREFIX[role] || '';
+    if (role !== 'patron' && role !== 'cyber' && role !== 'client') return res.status(403).json({ error: 'Réservé au patron' });
+    const prefix = settingsPrefix(req.session.user);
     for (const [k, v] of Object.entries(req.body)) {
       await pool.query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2', [prefix + k, String(v)]);
     }
@@ -790,13 +831,13 @@ app.get('/api/invoices/:id/payments', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-async function getScopedSettings(role) {
-  const prefix = ROLE_SETTINGS_PREFIX[role] || '';
+async function getScopedSettings(user) {
+  const prefix = settingsPrefix(user);
   const rows = await query('SELECT key,value FROM settings');
   const s = {};
   rows.forEach(r => {
     if (prefix) { if (r.key.startsWith(prefix)) s[r.key.slice(prefix.length)] = r.value; }
-    else if (!r.key.startsWith('cyber_')) s[r.key] = r.value;
+    else if (!OTHER_PREFIX_RE.test(r.key)) s[r.key] = r.value;
   });
   return s;
 }
@@ -809,7 +850,7 @@ app.post('/api/invoices/:id/send-email', auth, async (req, res) => {
     const { to, message } = req.body;
     if (!to) return res.status(400).json({ error: 'Recipient email is required' });
 
-    const s = await getScopedSettings(req.session.user.role);
+    const s = await getScopedSettings(req.session.user);
     if (!s.smtp_host || !s.smtp_user || !s.smtp_pass) {
       return res.status(400).json({ error: 'Email isn\'t set up yet — add your SMTP details in Settings first.' });
     }
@@ -1085,13 +1126,13 @@ app.get('/verify/:token', async (req, res) => {
       `));
     }
 
-    const owner = inv.owner_id ? await queryOne('SELECT role FROM users WHERE id=?', [inv.owner_id]) : null;
-    const prefix = ROLE_SETTINGS_PREFIX[owner?.role] || '';
+    const owner = inv.owner_id ? await queryOne('SELECT id,role FROM users WHERE id=?', [inv.owner_id]) : null;
+    const prefix = settingsPrefix(owner);
     const settingsRows = await query('SELECT key,value FROM settings');
     const s = {};
     settingsRows.forEach(r => {
       if (prefix) { if (r.key.startsWith(prefix)) s[r.key.slice(prefix.length)] = r.value; }
-      else if (!r.key.startsWith('cyber_')) s[r.key] = r.value;
+      else if (!OTHER_PREFIX_RE.test(r.key)) s[r.key] = r.value;
     });
     const companyName = s.company_name || 'WhiteSky Travel Agency';
 

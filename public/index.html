@@ -24,9 +24,20 @@
       <h1 id="login-company-name">M&amp;S Cyber Systems</h1>
       <p id="login-tagline">Invoicing System</p>
     </div>
-    <div class="form-field"><label>Username</label><input type="text" id="login-user" placeholder="patron or employe" autocomplete="username"/></div>
-    <div class="form-field"><label>Password</label><input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"/></div>
-    <button class="btn-login" id="btn-login">Sign In</button>
+    <div id="signin-fields">
+      <div class="form-field"><label>Username</label><input type="text" id="login-user" placeholder="patron or employe" autocomplete="username"/></div>
+      <div class="form-field"><label>Password</label><input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"/></div>
+      <button class="btn-login" id="btn-login">Sign In</button>
+      <div class="login-hint" style="border-top:none;padding-top:0;margin-top:.75rem"><a href="#" onclick="toggleAuthMode('signup');return false;">New here? Create your account</a></div>
+    </div>
+    <div id="signup-fields" class="hidden">
+      <div class="form-field"><label>Your name</label><input type="text" id="su-display" placeholder="Boudy Hajj" autocomplete="name"/></div>
+      <div class="form-field"><label>Company name</label><input type="text" id="su-company" placeholder="Liorah Travel" autocomplete="organization"/></div>
+      <div class="form-field"><label>Username</label><input type="text" id="su-user" placeholder="Choose a username" autocomplete="username"/></div>
+      <div class="form-field"><label>Password</label><input type="password" id="su-pass" placeholder="At least 6 characters" autocomplete="new-password"/></div>
+      <button class="btn-login" id="btn-signup">Create Account</button>
+      <div class="login-hint" style="border-top:none;padding-top:0;margin-top:.75rem"><a href="#" onclick="toggleAuthMode('signin');return false;">Already have an account? Sign in</a></div>
+    </div>
     <div class="login-error" id="login-error"></div>
   </div>
 </div>

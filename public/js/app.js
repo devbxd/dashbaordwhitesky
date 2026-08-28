@@ -137,6 +137,7 @@ function tagBadge(t){const cls={VIP:'badge-vip',New:'badge-new',Regular:'badge-r
 /* DOMAIN LABELS — lets the same invoice/ticket engine speak "travel" for White Sky or
    "services" for M&S Cyber Systems, purely as a UI relabeling (same DB columns underneath). */
 function isCyber(){return !!(currentUser&&currentUser.role==='cyber');}
+function isClient(){return !!(currentUser&&currentUser.role==='client');}
 function dl(){
   if(isCyber())return{
     ticketsNav:'Services',newTicketNav:'New Service',ticketsTitle:'Services',newTicketTitle:'New Service',
@@ -187,6 +188,32 @@ async function init(){const{user}=await api('GET','/api/me');settings=await api(
 document.getElementById('btn-login').addEventListener('click',doLogin);
 ['login-user','login-pass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();}));
 async function doLogin(){const btn=document.getElementById('btn-login');const err=document.getElementById('login-error');btn.textContent='…';btn.disabled=true;const data=await api('POST','/api/login',{username:document.getElementById('login-user').value.trim(),password:document.getElementById('login-pass').value});btn.textContent='Sign In';btn.disabled=false;if(data.success){currentUser=data.user;err.style.display='none';settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);cacheLoginBranding();await playWelcome(currentUser.display_name,currentUser.role==='cyber');showApp();showPage('dashboard');}else{err.textContent=data.error||'Invalid credentials';err.style.display='block';}}
+
+function toggleAuthMode(mode){
+  document.getElementById('signin-fields').classList.toggle('hidden',mode!=='signin');
+  document.getElementById('signup-fields').classList.toggle('hidden',mode!=='signup');
+  document.getElementById('login-error').style.display='none';
+}
+document.getElementById('btn-signup').addEventListener('click',doSignup);
+['su-display','su-company','su-user','su-pass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')doSignup();}));
+async function doSignup(){
+  const btn=document.getElementById('btn-signup');const err=document.getElementById('login-error');
+  const display_name=document.getElementById('su-display').value.trim();
+  const company_name=document.getElementById('su-company').value.trim();
+  const username=document.getElementById('su-user').value.trim();
+  const password=document.getElementById('su-pass').value;
+  if(!display_name||!username||!password){err.textContent='Please fill in all fields';err.style.display='block';return;}
+  btn.textContent='…';btn.disabled=true;
+  const data=await api('POST','/api/signup',{username,password,display_name,company_name});
+  btn.textContent='Create Account';btn.disabled=false;
+  if(data.success){
+    currentUser=data.user;err.style.display='none';
+    settings=await api('GET','/api/settings').catch(()=>({}));
+    applyLanguage(settings.lang);cacheLoginBranding();
+    await playWelcome(currentUser.display_name,false);
+    showApp();showPage('dashboard');
+  }else{err.textContent=data.error||'Could not create account';err.style.display='block';}
+}
 function playWelcome(name,cyber){
   const overlay=document.getElementById('welcome-overlay');
   document.getElementById('welcome-icon-i').className=cyber?'ti ti-shield-lock':'ti ti-plane';
@@ -202,12 +229,14 @@ function playWelcome(name,cyber){
   });
 }
 document.getElementById('btn-logout').addEventListener('click',async()=>{await api('POST','/api/logout');currentUser=null;document.getElementById('app-screen').classList.add('hidden');document.getElementById('login-screen').style.display='flex';document.getElementById('login-pass').value='';});
-function showApp(){document.getElementById('login-screen').style.display='none';document.getElementById('app-screen').classList.remove('hidden');document.getElementById('user-avatar').textContent=initials(currentUser.display_name);document.getElementById('user-name-display').textContent=currentUser.display_name;const roleLabels={patron:'Administrator',employe:'Staff',demo:'Demo',cyber:'CEO'};document.getElementById('user-role-display').textContent=roleLabels[currentUser.role]||'Staff';applyBranding();}
+function showApp(){document.getElementById('login-screen').style.display='none';document.getElementById('app-screen').classList.remove('hidden');document.getElementById('user-avatar').textContent=initials(currentUser.display_name);document.getElementById('user-name-display').textContent=currentUser.display_name;const roleLabels={patron:'Administrator',employe:'Staff',demo:'Demo',cyber:'CEO',client:'Owner'};document.getElementById('user-role-display').textContent=roleLabels[currentUser.role]||'Staff';applyBranding();}
 function applyBranding(){
   const cyber=isCyber();
-  const bn=document.querySelector('.brand-name');if(bn)bn.textContent=cyber?'M&S Cyber Systems':'White Sky Travel';
-  document.title=cyber?'M&S Cyber Systems — Invoicing':'WhiteSky Travel — Invoicing';
-  const bi=document.querySelector('.brand-icon i');if(bi)bi.className=cyber?'ti ti-shield-lock':'ti ti-plane';
+  const client=isClient();
+  const brandName=cyber?'M&S Cyber Systems':(client?(settings.company_name||currentUser.display_name):'White Sky Travel');
+  const bn=document.querySelector('.brand-name');if(bn)bn.textContent=brandName;
+  document.title=cyber?'M&S Cyber Systems — Invoicing':`${brandName} — Invoicing`;
+  const bi=document.querySelector('.brand-icon i');if(bi)bi.className=cyber?'ti ti-shield-lock':(client?'ti ti-building-store':'ti ti-plane');
   const labels=dl();
   const tSep=document.querySelector('.nav-sep[data-sep="tickets"]');if(tSep)tSep.textContent=labels.ticketsNav;
   const tSpan=document.querySelector('.nav-item[data-page="tickets"] span');if(tSpan)tSpan.textContent=labels.ticketsNav;
@@ -912,7 +941,7 @@ async function loadReport(){
 <div class="card" style="padding:0;overflow:hidden"><div class="card-header" style="padding:1rem 1.25rem"><span class="card-title">${list.length} invoice(s) — Total: <strong>${fmt(total)}</strong></span></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Due</th><th>Total</th><th>Status</th><th>Created by</th></tr></thead><tbody>${list.length===0?`<tr><td colspan="7"><div class="empty-state"><i class="ti ti-file-off"></i><h3>No invoices for this period</h3></div></td></tr>`:list.map(i=>`<tr><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewInvoice(${i.id})">${i.num}</td><td>${i.client_name}</td><td>${fmtDate(i.date)}</td><td>${fmtDate(i.due_date)}</td><td style="font-weight:700">${fmt(i.total,i.currency)}</td><td>${statusBadge(i.status)}</td><td style="color:#aaa;font-size:12px">${i.owner_name||'—'}</td></tr>`).join('')}</tbody></table></div></div>`;}
 
 /* SETTINGS */
-async function pageSettings(mc){const isP=currentUser.role==='patron';const canEdit=isP||isCyber();settings=await api('GET','/api/settings');let users=[];if(isP)users=await api('GET','/api/users');const currencies=['KWD','USD','EUR','LBP','AED','SAR'];mc.innerHTML=`<div class="page-header"><div><div class="page-title">Settings</div></div></div>
+async function pageSettings(mc){const isP=currentUser.role==='patron';const canEdit=isP||isCyber()||isClient();settings=await api('GET','/api/settings');let users=[];if(isP)users=await api('GET','/api/users');const currencies=['KWD','USD','EUR','LBP','AED','SAR'];mc.innerHTML=`<div class="page-header"><div><div class="page-title">Settings</div></div></div>
 <div class="card" style="max-width:640px">
   <div class="settings-label">Company Logo</div>
   <div class="logo-upload-area" id="logo-drop" onclick="document.getElementById('logo-file').click()">
