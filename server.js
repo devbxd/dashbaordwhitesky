@@ -547,6 +547,9 @@ app.put('/api/invoices/:id', auth, async (req, res) => {
       await run('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,"airlineRef",travel_date,price) VALUES (?,?,?,?,?,?,?,?)',
         [req.params.id, row.pnr || '', row.destination || '', row.passenger || '', row.airline || '', row.airlineRef || '', row.travel_date || '', parseFloat(row.price) || 0]);
     }
+    // Editing an invoice away from paid/partial must also drop any recorded payment,
+    // same as the dedicated status-toggle route, so Payments/totals stay consistent.
+    if (status !== 'paid' && status !== 'partial') await run('DELETE FROM payments WHERE invoice_id=?', [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
