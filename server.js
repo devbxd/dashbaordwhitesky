@@ -325,8 +325,30 @@ app.use(session({
   cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 }
 }));
 
-function auth(req, res, next) { if (!req.session.user) return res.status(401).json({ error: 'Non autorisé' }); next(); }
-function patron(req, res, next) { if (!req.session.user || req.session.user.role !== 'patron') return res.status(403).json({ error: 'Réservé au patron' }); next(); }
+async function auth(req, res, next) {
+  if (!req.session.user) return res.status(401).json({ error: 'Non autorisé' });
+  try {
+    // Checked on every request, not just at login — deactivating someone now cuts off
+    // an already-open session immediately instead of waiting for it to expire (30 days).
+    const u = await queryOne('SELECT active FROM users WHERE id=?', [req.session.user.id]);
+    if (!u || u.active === false) {
+      req.session.destroy(() => {});
+      return res.status(403).json({ error: 'Your account is not available. Contact +961 71 335 614 on WhatsApp.', deactivated: true });
+    }
+  } catch (e) { return res.status(500).json({ error: e.message }); }
+  next();
+}
+async function patron(req, res, next) {
+  if (!req.session.user || req.session.user.role !== 'patron') return res.status(403).json({ error: 'Réservé au patron' });
+  try {
+    const u = await queryOne('SELECT active FROM users WHERE id=?', [req.session.user.id]);
+    if (!u || u.active === false) {
+      req.session.destroy(() => {});
+      return res.status(403).json({ error: 'Your account is not available. Contact +961 71 335 614 on WhatsApp.', deactivated: true });
+    }
+  } catch (e) { return res.status(500).json({ error: e.message }); }
+  next();
+}
 
 app.post('/api/login', async (req, res) => {
   try {
@@ -1209,6 +1231,8 @@ app.get('/api/verify/:token', async (req, res) => {
     res.json({ authentic: true, ...inv });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+app.get('/download', (req, res) => res.sendFile(path.join(__dirname, 'public', 'download.html')));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 

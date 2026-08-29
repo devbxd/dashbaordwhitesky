@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoices Dashboard — Download</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap">
+<style>
+  :root{
+    --navy:#0a3258;
+    --blue:#1A6FB5;
+    --blue-light:#4da6ff;
+    --bg:#EEF2F8;
+    --text:#1a1a2e;
+    --text-soft:#556;
+    --text-faint:#93a0b3;
+    --border:#e5eaf2;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:'Plus Jakarta Sans',Arial,sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+
+  /* HERO */
+  .hero{
+    position:relative;
+    padding:90px 24px 130px;
+    text-align:center;
+    background:
+      radial-gradient(circle at 20% 10%,#134a80 0%,transparent 45%),
+      radial-gradient(circle at 85% 30%,#1e5c94 0%,transparent 40%),
+      linear-gradient(160deg,#081f38 0%,#0a3258 45%,#124d80 100%);
+    color:#fff;
+    overflow:hidden;
+  }
+  .hero::after{
+    content:"";
+    position:absolute;inset:0;
+    background:
+      linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px) 0 0/56px 56px,
+      linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px) 0 0/56px 56px;
+    mask-image:radial-gradient(ellipse at 50% 0%,#000 0%,transparent 70%);
+    pointer-events:none;
+  }
+  .hero-inner{position:relative;max-width:760px;margin:0 auto}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    color:#bcd7f5;background:rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.18);
+    padding:7px 16px;border-radius:30px;margin-bottom:28px;
+  }
+  .eyebrow .dot{width:7px;height:7px;border-radius:50%;background:#4ade80;box-shadow:0 0 8px #4ade80}
+  h1{
+    font-size:clamp(36px,5.5vw,58px);
+    font-weight:800;
+    line-height:1.08;
+    letter-spacing:-0.02em;
+    margin-bottom:20px;
+  }
+  h1 span{
+    background:linear-gradient(120deg,#8ecbff,#e0f0ff);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .hero p.lede{
+    font-size:18px;
+    color:#c2d9f0;
+    line-height:1.65;
+    max-width:520px;
+    margin:0 auto 40px;
+  }
+  .cta-btn{
+    display:inline-flex;align-items:center;gap:12px;
+    background:linear-gradient(145deg,#ffffff,#e7f1ff);
+    color:var(--navy);
+    font-size:18px;font-weight:800;
+    padding:19px 38px;border-radius:14px;
+    text-decoration:none;
+    box-shadow:0 16px 40px rgba(0,0,0,.35),0 2px 0 rgba(255,255,255,.6) inset;
+    transition:transform .18s ease,box-shadow .18s ease;
+  }
+  .cta-btn:hover{transform:translateY(-2px);box-shadow:0 20px 50px rgba(0,0,0,.4),0 2px 0 rgba(255,255,255,.6) inset}
+  .cta-btn:active{transform:translateY(0)}
+  .cta-btn svg{width:22px;height:22px;flex-shrink:0}
+  .cta-meta{
+    margin-top:18px;font-size:13px;color:#8fb0d4;
+    display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;
+  }
+  .cta-meta span{display:inline-flex;align-items:center;gap:6px}
+
+  /* HERO SHOT */
+  .hero-shot-wrap{
+    position:relative;
+    max-width:1080px;
+    margin:64px auto -140px;
+    padding:0 24px;
+  }
+  .hero-shot{
+    border-radius:16px;
+    overflow:hidden;
+    box-shadow:0 40px 90px rgba(3,15,30,.55),0 0 0 1px rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.12);
+    height:min(46vw,560px);
+  }
+  .hero-shot img{display:block;width:100%;height:100%;object-fit:cover;object-position:top}
+
+  /* SHOWCASE */
+  .showcase{
+    max-width:1120px;
+    margin:0 auto;
+    padding:200px 24px 60px;
+  }
+  .showcase-head{text-align:center;max-width:560px;margin:0 auto 56px}
+  .showcase-head .kicker{
+    font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--blue);margin-bottom:12px;
+  }
+  .showcase-head h2{
+    font-size:clamp(26px,3.4vw,34px);font-weight:800;letter-spacing:-.01em;
+    color:var(--navy);margin-bottom:14px;text-wrap:balance;
+  }
+  .showcase-head p{color:var(--text-soft);font-size:15.5px;line-height:1.65}
+
+  .shot-grid{
+    display:grid;
+    grid-template-columns:1.3fr 1fr;
+    gap:22px;
+    align-items:start;
+  }
+  .shot-card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:16px;
+    overflow:hidden;
+    box-shadow:0 8px 30px rgba(10,40,70,.08);
+    transition:transform .2s ease,box-shadow .2s ease;
+  }
+  .shot-card:hover{transform:translateY(-4px);box-shadow:0 16px 40px rgba(10,40,70,.14)}
+  .shot-card .frame{
+    overflow:hidden;
+    background:var(--bg);
+    height:280px;
+  }
+  .shot-card.tall .frame{height:460px}
+  .shot-card img{display:block;width:100%;height:100%;object-fit:cover;object-position:top}
+  .shot-card .cap{padding:16px 20px}
+  .shot-card .cap .t{font-size:14.5px;font-weight:700;color:var(--navy)}
+  .shot-card .cap .d{font-size:12.5px;color:var(--text-faint);margin-top:2px}
+  .shot-col{display:flex;flex-direction:column;gap:22px}
+
+  /* FEATURES */
+  .features{
+    max-width:1120px;margin:0 auto;padding:40px 24px 90px;
+    display:grid;grid-template-columns:repeat(4,1fr);gap:18px;
+  }
+  .feature{
+    background:#fff;border:1px solid var(--border);border-radius:14px;
+    padding:24px 20px;text-align:left;
+  }
+  .feature .ic{
+    width:38px;height:38px;border-radius:10px;
+    background:linear-gradient(145deg,#e8f2fb,#dceaf9);
+    display:flex;align-items:center;justify-content:center;margin-bottom:14px;
+  }
+  .feature .ic svg{width:19px;height:19px;color:var(--blue)}
+  .feature h3{font-size:14.5px;font-weight:700;color:var(--navy);margin-bottom:5px}
+  .feature p{font-size:12.5px;color:var(--text-faint);line-height:1.55}
+
+  /* FOOTER CTA */
+  .footer-cta{
+    text-align:center;padding:80px 24px 100px;
+    background:linear-gradient(180deg,transparent,rgba(10,50,88,.04));
+  }
+  .footer-cta h2{font-size:clamp(24px,3vw,30px);font-weight:800;color:var(--navy);margin-bottom:14px;letter-spacing:-.01em}
+  .footer-cta p{color:var(--text-soft);font-size:15px;margin-bottom:32px}
+  .cta-btn.dark{
+    background:linear-gradient(145deg,var(--blue),var(--navy));
+    color:#fff;
+    box-shadow:0 16px 36px rgba(26,111,181,.35);
+  }
+  .cta-btn.dark:hover{box-shadow:0 20px 44px rgba(26,111,181,.42)}
+  .foot-mark{margin-top:56px;font-size:12px;color:var(--text-faint);letter-spacing:.03em}
+
+  @media(max-width:860px){
+    .shot-grid{grid-template-columns:1fr}
+    .shot-card.tall .frame{height:380px}
+    .features{grid-template-columns:1fr 1fr}
+    .hero-shot-wrap{margin-bottom:-80px}
+    .showcase{padding-top:130px}
+  }
+  @media(max-width:520px){
+    .features{grid-template-columns:1fr}
+    .cta-meta{gap:10px}
+    .hero{padding:70px 18px 100px}
+  }
+</style>
+</head>
+<body>
+
+<section class="hero">
+  <div class="hero-inner">
+    <div class="eyebrow"><span class="dot"></span> Free to install · Windows</div>
+    <h1>Run your agency from<br><span>one dashboard.</span></h1>
+    <p class="lede">Invoices, quotes, payments and clients — one desktop app, always up to date, nothing to configure.</p>
+    <a class="cta-btn" href="https://github.com/devbxd/dashbaordwhitesky/releases/latest/download/Invoices-Dashboard-Setup.exe">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>
+      Download for Windows
+    </a>
+    <div class="cta-meta">
+      <span>Windows 10 / 11</span>
+      <span>·</span>
+      <span>~80 MB</span>
+      <span>·</span>
+      <span>Sign in or create your account on first open</span>
+    </div>
+  </div>
+  <div class="hero-shot-wrap">
+    <div class="hero-shot"><img src="/landing/shot-dashboard.png" alt="Dashboard overview"/></div>
+  </div>
+</section>
+
+<section class="showcase">
+  <div class="showcase-head">
+    <div class="kicker">Inside the app</div>
+    <h2>Everything your front desk needs, in one place</h2>
+    <p>From the first quote to the final payment — track it all without switching between spreadsheets.</p>
+  </div>
+  <div class="shot-grid">
+    <div class="shot-card tall">
+      <div class="frame"><img src="/landing/shot-invoice-view.png" alt="A branded invoice with payment history and a verification QR code"/></div>
+      <div class="cap"><div class="t">Branded invoices, paid or not</div><div class="d">Payment history, balance due, and a scan-to-verify QR code on every invoice</div></div>
+    </div>
+    <div class="shot-col">
+      <div class="shot-card">
+        <div class="frame"><img src="/landing/shot-reports.png" alt="Revenue reports and top clients"/></div>
+        <div class="cap"><div class="t">Revenue at a glance</div><div class="d">Monthly trends and top clients, updated automatically</div></div>
+      </div>
+      <div class="shot-card">
+        <div class="frame"><img src="/landing/shot-invoices.png" alt="Invoice list"/></div>
+        <div class="cap"><div class="t">Every invoice, one list</div><div class="d">Filter by status, client or date in a click</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="features">
+  <div class="feature">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2h6l3 3v17H6V5l3-3Z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg></div>
+    <h3>Quotes → Invoices</h3>
+    <p>Send a quote, convert it to an invoice the moment it's accepted.</p>
+  </div>
+  <div class="feature">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h18M7 15h4"/><rect x="3" y="5" width="18" height="14" rx="2"/></svg></div>
+    <h3>Flexible payments</h3>
+    <p>Take a deposit now, the rest later — the balance tracks itself.</p>
+  </div>
+  <div class="feature">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 6v6c0 5 4 9 9 10 5-1 9-5 9-10V6l-9-4Z"/></svg></div>
+    <h3>Verifiable invoices</h3>
+    <p>Every invoice carries a QR code clients can scan to confirm it's genuine.</p>
+  </div>
+  <div class="feature">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8h14M5 8a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v1a2 2 0 0 1-2 2M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/></svg></div>
+    <h3>English, French, Arabic</h3>
+    <p>Switch languages any time, right-to-left included.</p>
+  </div>
+</section>
+
+<section class="footer-cta">
+  <h2>Ready when you are.</h2>
+  <p>Install it once — every update reaches you automatically after that.</p>
+  <a class="cta-btn dark" href="https://github.com/devbxd/dashbaordwhitesky/releases/latest/download/Invoices-Dashboard-Setup.exe">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>
+    Download for Windows
+  </a>
+  <div class="foot-mark">Invoices Dashboard</div>
+</section>
+
+</body>
+</html>

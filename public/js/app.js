@@ -120,7 +120,19 @@ const _langObserver=new MutationObserver(muts=>{
 });
 document.addEventListener('DOMContentLoaded',()=>{_langObserver.observe(document.body,{childList:true,subtree:true,characterData:true});});
 
-async function api(method,url,body){const o={method,headers:{'Content-Type':'application/json'}};if(body!==undefined)o.body=JSON.stringify(body);const r=await fetch(url,o);return r.json();}
+async function api(method,url,body){const o={method,headers:{'Content-Type':'application/json'}};if(body!==undefined)o.body=JSON.stringify(body);const r=await fetch(url,o);const data=await r.json();if(data&&data.deactivated)forceLogout(data.error);return data;}
+function forceLogout(message){
+  currentUser=null;
+  document.getElementById('app-screen').classList.add('hidden');
+  document.getElementById('welcome-overlay').classList.add('hidden');
+  const loginScreen=document.getElementById('login-screen');
+  loginScreen.style.display='flex';
+  toggleAuthMode('signin');
+  const err=document.getElementById('login-error');
+  err.textContent=message||'Your session has ended.';
+  err.style.display='block';
+  document.getElementById('login-pass').value='';
+}
 
 function toast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+type;clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast hidden',3000);}
 function openModal(id){document.getElementById(id).classList.remove('hidden');}
@@ -997,7 +1009,7 @@ async function pageSettings(mc){const isP=currentUser.role==='patron';const canE
 ${canEdit?`<div class="card" style="max-width:640px"><div class="card-header"><span class="card-title"><i class="ti ti-mail" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Email Sending</span></div><p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">Lets you send invoices to clients by email. Use your email provider's SMTP details — for Gmail, that's an <a href="https://support.google.com/accounts/answer/185833" target="_blank" style="color:#1A6FB5">app password</a>, not your normal password.</p><div class="form-grid2" style="gap:14px"><div class="form-group"><label class="form-label">SMTP host</label><input class="form-input" id="s-smtp-host" value="${settings.smtp_host||''}" placeholder="smtp.gmail.com"/></div><div class="form-group"><label class="form-label">Port</label><input type="number" class="form-input" id="s-smtp-port" value="${settings.smtp_port||587}"/></div><div class="form-group"><label class="form-label">Username</label><input class="form-input" id="s-smtp-user" value="${settings.smtp_user||''}" placeholder="you@yourcompany.com"/></div><div class="form-group"><label class="form-label">Password</label><input type="password" class="form-input" id="s-smtp-pass" value="${settings.smtp_pass||''}"/></div><div class="form-group full"><label class="form-label">"From" address <span style="color:#aaa;font-weight:400">(optional, defaults to username)</span></label><input class="form-input" id="s-smtp-from" value="${settings.smtp_from||''}"/></div></div><button class="btn-save" onclick="saveSmtpSettings()">Save Email Settings</button></div>`:''}
 ${isP?`<div class="card" style="max-width:640px"><div class="card-header"><span class="card-title">Users</span><button class="btn-new" onclick="openUserModal()"><i class="ti ti-plus"></i> Add</button></div>${users.map(u=>`<div class="access-row"><div style="display:flex;align-items:center;gap:12px"><div class="user-avatar" style="width:38px;height:38px;font-size:13px;background:${u.role==='patron'?'#deeeff':'#fff4e0'};color:${u.role==='patron'?'#0a3258':'#a05c00'}">${initials(u.display_name)}</div><div><div style="font-size:14px;font-weight:700">${u.display_name}</div><div style="font-size:12px;color:#aaa">${u.username} — ${u.role==='patron'?'Administrator':'Staff'}</div></div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge ${u.role==='patron'?'badge-paid':'badge-pending'}">${u.role==='patron'?'Admin':'Staff'}</span><button class="action-btn" onclick="openUserModal(${u.id})"><i class="ti ti-edit"></i></button>${u.id!==currentUser.id?`<button class="action-btn danger" onclick="deleteUser(${u.id})"><i class="ti ti-trash"></i></button>`:''}</div></div>`).join('')}</div>`:''}
 `;}
-const DESKTOP_APP_URL='https://github.com/devbxd/dashbaordwhitesky/releases/latest/download/Invoices-Dashboard-Setup.exe';
+const DESKTOP_APP_URL='https://dashbaordwhitesky-7fw2.onrender.com/download';
 function copyDownloadLink(){const el=document.getElementById('dl-link');el.select();navigator.clipboard.writeText(el.value).then(()=>toast('✅ Link copied','success')).catch(()=>toast('Could not copy — select and copy manually','error'));}
 
 async function saveSettings(){const body={company_name:document.getElementById('s-name')?.value.trim(),company_address:document.getElementById('s-addr')?.value.trim(),company_phone_p:document.getElementById('s-phone-p')?.value.trim(),company_phone_m:document.getElementById('s-phone-m')?.value.trim(),company_email:document.getElementById('s-email')?.value.trim(),invoice_currency:document.getElementById('s-currency')?.value,invoice_due_days:document.getElementById('s-due-days')?.value,invoice_footer:document.getElementById('s-footer')?.value,lang:document.getElementById('s-lang')?.value||'en'};await api('POST','/api/settings',body);settings=await api('GET','/api/settings');toast('✅ Settings saved','success');}
