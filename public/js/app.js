@@ -198,13 +198,11 @@ function cacheLoginBranding(){
 applyLoginBrandingFromCache();
 // Self-signup is only offered inside the desktop app (main.js loads the page with
 // ?client=desktop) — the plain website never shows it, so a random visitor can't just
-// register themselves. And even inside the app, it's a one-shot: once this particular
-// install has been used to create an account, it hides itself for good (localStorage is
-// private per Electron install, so this doesn't affect other people's copies of the app).
+// register themselves. The real access control is the invite code required server-side
+// (see /api/signup) — without a valid, unused code the form doesn't get anyone anywhere,
+// so the link itself can stay visible every time.
 function signupAllowedHere(){
-  const isDesktopApp=new URLSearchParams(location.search).get('client')==='desktop';
-  if(!isDesktopApp)return false;
-  try{return !localStorage.getItem('signupUsed');}catch(e){return true;}
+  return new URLSearchParams(location.search).get('client')==='desktop';
 }
 async function init(){const{user}=await api('GET','/api/me');settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);if(user){currentUser=user;cacheLoginBranding();showApp();showPage('dashboard');}else{document.getElementById('login-screen').style.display='flex';if(signupAllowedHere())document.getElementById('signup-toggle-hint').classList.remove('hidden');translateNode(document.getElementById('login-screen'));}}
 document.getElementById('btn-login').addEventListener('click',doLogin);
@@ -232,7 +230,6 @@ async function doSignup(){
   btn.textContent='Create Account';btn.disabled=false;
   if(data.success){
     currentUser=data.user;err.style.display='none';
-    try{localStorage.setItem('signupUsed','1');}catch(e){}
     settings=await api('GET','/api/settings').catch(()=>({}));
     applyLanguage(settings.lang);cacheLoginBranding();
     await playWelcome(currentUser.display_name,false);
