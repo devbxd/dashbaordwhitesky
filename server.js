@@ -54,9 +54,9 @@ function settingsPrefix(user) {
   return '';
 }
 const NUM_PREFIX = {
-  cyber: { inv: 'MSC-', tkt: 'MSC-SVC-', qte: 'MSC-QTE-', cn: 'MSC-CN-' },
-  demo: { inv: 'DEMO-', tkt: 'DEMO-TKT-', qte: 'DEMO-QTE-', cn: 'DEMO-CN-' },
-  client: { inv: 'INV-', tkt: 'TKT-', qte: 'QTE-', cn: 'CN-' },
+  cyber: { inv: 'MSC-', tkt: 'MSC-SVC-', qte: 'MSC-QTE-', cn: 'MSC-CN-', htl: 'MSC-HTL-', visa: 'MSC-VISA-', grp: 'MSC-GRP-' },
+  demo: { inv: 'DEMO-', tkt: 'DEMO-TKT-', qte: 'DEMO-QTE-', cn: 'DEMO-CN-', htl: 'DEMO-HTL-', visa: 'DEMO-VISA-', grp: 'DEMO-GRP-' },
+  client: { inv: 'INV-', tkt: 'TKT-', qte: 'QTE-', cn: 'CN-', htl: 'HTL-', visa: 'VISA-', grp: 'GRP-' },
 };
 
 async function query(sql, params = []) {
@@ -138,6 +138,7 @@ async function initDB() {
       passenger TEXT,
       date TEXT,
       system_issue TEXT,
+      currency TEXT DEFAULT 'KWD',
       net_price REAL DEFAULT 0,
       selling_price REAL DEFAULT 0,
       status TEXT DEFAULT 'unpaid',
@@ -147,6 +148,71 @@ async function initDB() {
       owner_id INTEGER,
       owner_name TEXT,
       created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    );
+    CREATE TABLE IF NOT EXISTS hotel_bookings (
+      id SERIAL PRIMARY KEY,
+      num TEXT UNIQUE NOT NULL,
+      hotel_name TEXT,
+      confirmation_num TEXT,
+      destination TEXT,
+      room_type TEXT,
+      passenger TEXT,
+      checkin_date TEXT,
+      checkout_date TEXT,
+      currency TEXT DEFAULT 'KWD',
+      net_price REAL DEFAULT 0,
+      selling_price REAL DEFAULT 0,
+      status TEXT DEFAULT 'unpaid',
+      notes TEXT,
+      booking_type TEXT DEFAULT 'individual',
+      client_id INTEGER,
+      owner_id INTEGER,
+      owner_name TEXT,
+      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    );
+    CREATE TABLE IF NOT EXISTS visas (
+      id SERIAL PRIMARY KEY,
+      num TEXT UNIQUE NOT NULL,
+      visa_type TEXT,
+      country TEXT,
+      passenger TEXT,
+      passport_num TEXT,
+      date TEXT,
+      appointment_date TEXT,
+      currency TEXT DEFAULT 'KWD',
+      net_price REAL DEFAULT 0,
+      selling_price REAL DEFAULT 0,
+      status TEXT DEFAULT 'submitted',
+      notes TEXT,
+      booking_type TEXT DEFAULT 'individual',
+      client_id INTEGER,
+      owner_id INTEGER,
+      owner_name TEXT,
+      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    );
+    CREATE TABLE IF NOT EXISTS groups_trips (
+      id SERIAL PRIMARY KEY,
+      num TEXT UNIQUE NOT NULL,
+      name TEXT,
+      destination TEXT,
+      departure_date TEXT,
+      return_date TEXT,
+      currency TEXT DEFAULT 'KWD',
+      status TEXT DEFAULT 'draft',
+      notes TEXT,
+      owner_id INTEGER,
+      owner_name TEXT,
+      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    );
+    CREATE TABLE IF NOT EXISTS group_travelers (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL,
+      name TEXT,
+      phone TEXT,
+      room_no TEXT,
+      amount REAL DEFAULT 0,
+      paid BOOLEAN DEFAULT false,
+      notes TEXT
     );
     CREATE TABLE IF NOT EXISTS payments (
       id SERIAL PRIMARY KEY,
@@ -236,6 +302,9 @@ async function initDB() {
       used_at TEXT
     );
   `);
+  // ticket_sales predates the currency column — every ticket was silently saved in whatever
+  // the account's default currency is, ignoring the dropdown actually shown in the form.
+  await pool.query(`ALTER TABLE ticket_sales ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'KWD'`);
   // The live 'payments' table was created before invoice_num/client_name/amount/date existed
   // in this schema — CREATE TABLE IF NOT EXISTS silently skipped adding them, so every
   // payment ever recorded through the app was failing at the database level.
@@ -832,10 +901,10 @@ app.get('/api/tickets/:id', auth, async (req, res) => {
 });
 app.post('/api/tickets', auth, async (req, res) => {
   try {
-    const { num, airline, pnr, company, destination, passenger, date, system_issue, net_price, selling_price, status, notes, ticket_type, client_id } = req.body;
+    const { num, airline, pnr, company, destination, passenger, date, system_issue, currency, net_price, selling_price, status, notes, ticket_type, client_id } = req.body;
     const r = await queryOne(
-      'INSERT INTO ticket_sales (num,airline,pnr,company,destination,passenger,date,system_issue,net_price,selling_price,status,notes,ticket_type,client_id,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, airline || '', pnr || '', company || '', destination || '', passenger || '', cleanDate(date) || '', system_issue || '', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', ticket_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]);
+      'INSERT INTO ticket_sales (num,airline,pnr,company,destination,passenger,date,system_issue,currency,net_price,selling_price,status,notes,ticket_type,client_id,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
+      [num, airline || '', pnr || '', company || '', destination || '', passenger || '', cleanDate(date) || '', system_issue || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', ticket_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]);
     res.json({ id: r.id, num });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -845,9 +914,9 @@ app.put('/api/tickets/:id', auth, async (req, res) => {
       const t = await queryOne('SELECT owner_id FROM ticket_sales WHERE id=?', [req.params.id]);
       if (!t || t.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     }
-    const { airline, pnr, company, destination, passenger, date, system_issue, net_price, selling_price, status, notes, ticket_type, client_id } = req.body;
-    await run('UPDATE ticket_sales SET airline=?,pnr=?,company=?,destination=?,passenger=?,date=?,system_issue=?,net_price=?,selling_price=?,status=?,notes=?,ticket_type=?,client_id=? WHERE id=?',
-      [airline || '', pnr || '', company || '', destination || '', passenger || '', cleanDate(date) || '', system_issue || '', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', ticket_type || 'individual', client_id || null, req.params.id]);
+    const { airline, pnr, company, destination, passenger, date, system_issue, currency, net_price, selling_price, status, notes, ticket_type, client_id } = req.body;
+    await run('UPDATE ticket_sales SET airline=?,pnr=?,company=?,destination=?,passenger=?,date=?,system_issue=?,currency=?,net_price=?,selling_price=?,status=?,notes=?,ticket_type=?,client_id=? WHERE id=?',
+      [airline || '', pnr || '', company || '', destination || '', passenger || '', cleanDate(date) || '', system_issue || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', ticket_type || 'individual', client_id || null, req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -870,6 +939,237 @@ app.delete('/api/tickets/:id', auth, async (req, res) => {
     await run('DELETE FROM ticket_sales WHERE id=?', [req.params.id]); res.json({ success: true });
   }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ─── HOTELS ─── */
+app.get('/api/hotels/next-num', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).htl;
+      const last = await queryOne('SELECT num FROM hotel_bookings WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
+      if (!last) return res.json({ num: prefix + '001' });
+      const m = last.num.match(/(\d+)$/);
+      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+    }
+    const last = await queryOne('SELECT num FROM hotel_bookings ORDER BY id DESC LIMIT 1');
+    if (!last) return res.json({ num: 'HTL-001' });
+    const m = last.num.match(/(\d+)$/);
+    res.json({ num: 'HTL-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/hotels', auth, async (req, res) => {
+  try {
+    let q = 'SELECT * FROM hotel_bookings WHERE 1=1'; const p = [];
+    if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    q += ' ORDER BY created_at DESC';
+    res.json(await query(q, p));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/hotels/:id', auth, async (req, res) => {
+  try {
+    const h = await queryOne('SELECT * FROM hotel_bookings WHERE id=?', [req.params.id]);
+    if (!h) return res.status(404).json({ error: 'Not found' });
+    if (isIsolated(req.session.user.role) && h.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    res.json(h);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/hotels', auth, async (req, res) => {
+  try {
+    const { num, hotel_name, confirmation_num, destination, room_type, passenger, checkin_date, checkout_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
+    const r = await queryOne(
+      'INSERT INTO hotel_bookings (num,hotel_name,confirmation_num,destination,room_type,passenger,checkin_date,checkout_date,currency,net_price,selling_price,status,notes,booking_type,client_id,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
+      [num, hotel_name || '', confirmation_num || '', destination || '', room_type || '', passenger || '', cleanDate(checkin_date) || '', cleanDate(checkout_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', booking_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]);
+    res.json({ id: r.id, num });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/hotels/:id', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const h = await queryOne('SELECT owner_id FROM hotel_bookings WHERE id=?', [req.params.id]);
+      if (!h || h.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    const { hotel_name, confirmation_num, destination, room_type, passenger, checkin_date, checkout_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
+    await run('UPDATE hotel_bookings SET hotel_name=?,confirmation_num=?,destination=?,room_type=?,passenger=?,checkin_date=?,checkout_date=?,currency=?,net_price=?,selling_price=?,status=?,notes=?,booking_type=?,client_id=? WHERE id=?',
+      [hotel_name || '', confirmation_num || '', destination || '', room_type || '', passenger || '', cleanDate(checkin_date) || '', cleanDate(checkout_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', booking_type || 'individual', client_id || null, req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.patch('/api/hotels/:id/status', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const h = await queryOne('SELECT owner_id FROM hotel_bookings WHERE id=?', [req.params.id]);
+      if (!h || h.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    await run('UPDATE hotel_bookings SET status=? WHERE id=?', [req.body.status, req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/hotels/:id', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const h = await queryOne('SELECT owner_id FROM hotel_bookings WHERE id=?', [req.params.id]);
+      if (!h || h.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    await run('DELETE FROM hotel_bookings WHERE id=?', [req.params.id]); res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ─── VISAS ─── */
+app.get('/api/visas/next-num', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).visa;
+      const last = await queryOne('SELECT num FROM visas WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
+      if (!last) return res.json({ num: prefix + '001' });
+      const m = last.num.match(/(\d+)$/);
+      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+    }
+    const last = await queryOne('SELECT num FROM visas ORDER BY id DESC LIMIT 1');
+    if (!last) return res.json({ num: 'VISA-001' });
+    const m = last.num.match(/(\d+)$/);
+    res.json({ num: 'VISA-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/visas', auth, async (req, res) => {
+  try {
+    let q = 'SELECT * FROM visas WHERE 1=1'; const p = [];
+    if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    q += ' ORDER BY created_at DESC';
+    res.json(await query(q, p));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/visas/:id', auth, async (req, res) => {
+  try {
+    const v = await queryOne('SELECT * FROM visas WHERE id=?', [req.params.id]);
+    if (!v) return res.status(404).json({ error: 'Not found' });
+    if (isIsolated(req.session.user.role) && v.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    res.json(v);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/visas', auth, async (req, res) => {
+  try {
+    const { num, visa_type, country, passenger, passport_num, date, appointment_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
+    const r = await queryOne(
+      'INSERT INTO visas (num,visa_type,country,passenger,passport_num,date,appointment_date,currency,net_price,selling_price,status,notes,booking_type,client_id,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
+      [num, visa_type || '', country || '', passenger || '', passport_num || '', cleanDate(date) || '', cleanDate(appointment_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'submitted', notes || '', booking_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]);
+    res.json({ id: r.id, num });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/visas/:id', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const v = await queryOne('SELECT owner_id FROM visas WHERE id=?', [req.params.id]);
+      if (!v || v.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    const { visa_type, country, passenger, passport_num, date, appointment_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
+    await run('UPDATE visas SET visa_type=?,country=?,passenger=?,passport_num=?,date=?,appointment_date=?,currency=?,net_price=?,selling_price=?,status=?,notes=?,booking_type=?,client_id=? WHERE id=?',
+      [visa_type || '', country || '', passenger || '', passport_num || '', cleanDate(date) || '', cleanDate(appointment_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'submitted', notes || '', booking_type || 'individual', client_id || null, req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.patch('/api/visas/:id/status', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const v = await queryOne('SELECT owner_id FROM visas WHERE id=?', [req.params.id]);
+      if (!v || v.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    await run('UPDATE visas SET status=? WHERE id=?', [req.body.status, req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/visas/:id', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const v = await queryOne('SELECT owner_id FROM visas WHERE id=?', [req.params.id]);
+      if (!v || v.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    await run('DELETE FROM visas WHERE id=?', [req.params.id]); res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ─── GROUPS ─── */
+app.get('/api/groups/next-num', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).grp;
+      const last = await queryOne('SELECT num FROM groups_trips WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
+      if (!last) return res.json({ num: prefix + '001' });
+      const m = last.num.match(/(\d+)$/);
+      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+    }
+    const last = await queryOne('SELECT num FROM groups_trips ORDER BY id DESC LIMIT 1');
+    if (!last) return res.json({ num: 'GRP-001' });
+    const m = last.num.match(/(\d+)$/);
+    res.json({ num: 'GRP-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/groups', auth, async (req, res) => {
+  try {
+    let q = 'SELECT * FROM groups_trips WHERE 1=1'; const p = [];
+    if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    q += ' ORDER BY created_at DESC';
+    const groups = await query(q, p);
+    for (const g of groups) {
+      const travelers = await query('SELECT * FROM group_travelers WHERE group_id=?', [g.id]);
+      g.travelerCount = travelers.length;
+      g.totalCollected = travelers.reduce((a, t) => a + (t.paid ? (parseFloat(t.amount) || 0) : 0), 0);
+      g.totalExpected = travelers.reduce((a, t) => a + (parseFloat(t.amount) || 0), 0);
+    }
+    res.json(groups);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/groups/:id', auth, async (req, res) => {
+  try {
+    const g = await queryOne('SELECT * FROM groups_trips WHERE id=?', [req.params.id]);
+    if (!g) return res.status(404).json({ error: 'Not found' });
+    if (isIsolated(req.session.user.role) && g.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    g.travelers = await query('SELECT * FROM group_travelers WHERE group_id=? ORDER BY id', [req.params.id]);
+    res.json(g);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/groups', auth, async (req, res) => {
+  try {
+    const { num, name, destination, departure_date, return_date, currency, status, notes, travelers } = req.body;
+    const r = await queryOne(
+      'INSERT INTO groups_trips (num,name,destination,departure_date,return_date,currency,status,notes,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id',
+      [num, name || '', destination || '', cleanDate(departure_date) || '', cleanDate(return_date) || '', currency || 'KWD', status || 'draft', notes || '', req.session.user.id, req.session.user.display_name]);
+    for (const t of (travelers || [])) {
+      await run('INSERT INTO group_travelers (group_id,name,phone,room_no,amount,paid,notes) VALUES (?,?,?,?,?,?,?)',
+        [r.id, t.name || '', t.phone || '', t.room_no || '', parseFloat(t.amount) || 0, !!t.paid, t.notes || '']);
+    }
+    res.json({ id: r.id, num });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/groups/:id', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const g = await queryOne('SELECT owner_id FROM groups_trips WHERE id=?', [req.params.id]);
+      if (!g || g.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    const { name, destination, departure_date, return_date, currency, status, notes, travelers } = req.body;
+    await run('UPDATE groups_trips SET name=?,destination=?,departure_date=?,return_date=?,currency=?,status=?,notes=? WHERE id=?',
+      [name || '', destination || '', cleanDate(departure_date) || '', cleanDate(return_date) || '', currency || 'KWD', status || 'draft', notes || '', req.params.id]);
+    await run('DELETE FROM group_travelers WHERE group_id=?', [req.params.id]);
+    for (const t of (travelers || [])) {
+      await run('INSERT INTO group_travelers (group_id,name,phone,room_no,amount,paid,notes) VALUES (?,?,?,?,?,?,?)',
+        [req.params.id, t.name || '', t.phone || '', t.room_no || '', parseFloat(t.amount) || 0, !!t.paid, t.notes || '']);
+    }
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/groups/:id', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const g = await queryOne('SELECT owner_id FROM groups_trips WHERE id=?', [req.params.id]);
+      if (!g || g.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    await run('DELETE FROM group_travelers WHERE group_id=?', [req.params.id]);
+    await run('DELETE FROM groups_trips WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/invoices/:id/payments', auth, async (req, res) => {
