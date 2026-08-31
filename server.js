@@ -188,6 +188,7 @@ async function initDB() {
       selling_price REAL DEFAULT 0,
       status TEXT DEFAULT 'submitted',
       notes TEXT,
+      visa_file TEXT,
       booking_type TEXT DEFAULT 'individual',
       client_id INTEGER,
       owner_id INTEGER,
@@ -217,6 +218,17 @@ async function initDB() {
       amount REAL DEFAULT 0,
       paid BOOLEAN DEFAULT false,
       notes TEXT
+    );
+    CREATE TABLE IF NOT EXISTS client_passports (
+      id SERIAL PRIMARY KEY,
+      client_name TEXT NOT NULL,
+      passport_num TEXT,
+      passport_expiry TEXT,
+      passport_file TEXT,
+      notes TEXT,
+      owner_id INTEGER,
+      owner_name TEXT,
+      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
     );
     CREATE TABLE IF NOT EXISTS payments (
       id SERIAL PRIMARY KEY,
@@ -306,6 +318,7 @@ async function initDB() {
       used_at TEXT
     );
   `);
+  await pool.query(`ALTER TABLE visas ADD COLUMN IF NOT EXISTS visa_file TEXT`);
   // ticket_sales predates the currency column — every ticket was silently saved in whatever
   // the account's default currency is, ignoring the dropdown actually shown in the form.
   await pool.query(`ALTER TABLE ticket_sales ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'KWD'`);
@@ -1054,10 +1067,10 @@ app.get('/api/visas/:id', auth, async (req, res) => {
 });
 app.post('/api/visas', auth, async (req, res) => {
   try {
-    const { num, visa_type, country, passenger, passport_num, date, appointment_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
+    const { num, visa_type, country, passenger, passport_num, date, appointment_date, currency, net_price, selling_price, status, notes, booking_type, client_id, visa_file } = req.body;
     const r = await queryOne(
-      'INSERT INTO visas (num,visa_type,country,passenger,passport_num,date,appointment_date,currency,net_price,selling_price,status,notes,booking_type,client_id,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, visa_type || '', country || '', passenger || '', passport_num || '', cleanDate(date) || '', cleanDate(appointment_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'submitted', notes || '', booking_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]);
+      'INSERT INTO visas (num,visa_type,country,passenger,passport_num,date,appointment_date,currency,net_price,selling_price,status,notes,booking_type,client_id,visa_file,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
+      [num, visa_type || '', country || '', passenger || '', passport_num || '', cleanDate(date) || '', cleanDate(appointment_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'submitted', notes || '', booking_type || 'individual', client_id || null, visa_file || null, req.session.user.id, req.session.user.display_name]);
     res.json({ id: r.id, num });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1067,9 +1080,9 @@ app.put('/api/visas/:id', auth, async (req, res) => {
       const v = await queryOne('SELECT owner_id FROM visas WHERE id=?', [req.params.id]);
       if (!v || v.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     }
-    const { visa_type, country, passenger, passport_num, date, appointment_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
-    await run('UPDATE visas SET visa_type=?,country=?,passenger=?,passport_num=?,date=?,appointment_date=?,currency=?,net_price=?,selling_price=?,status=?,notes=?,booking_type=?,client_id=? WHERE id=?',
-      [visa_type || '', country || '', passenger || '', passport_num || '', cleanDate(date) || '', cleanDate(appointment_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'submitted', notes || '', booking_type || 'individual', client_id || null, req.params.id]);
+    const { visa_type, country, passenger, passport_num, date, appointment_date, currency, net_price, selling_price, status, notes, booking_type, client_id, visa_file } = req.body;
+    await run('UPDATE visas SET visa_type=?,country=?,passenger=?,passport_num=?,date=?,appointment_date=?,currency=?,net_price=?,selling_price=?,status=?,notes=?,booking_type=?,client_id=?,visa_file=? WHERE id=?',
+      [visa_type || '', country || '', passenger || '', passport_num || '', cleanDate(date) || '', cleanDate(appointment_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'submitted', notes || '', booking_type || 'individual', client_id || null, visa_file || null, req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1172,6 +1185,58 @@ app.delete('/api/groups/:id', auth, async (req, res) => {
     }
     await run('DELETE FROM group_travelers WHERE group_id=?', [req.params.id]);
     await run('DELETE FROM groups_trips WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ─── CLIENT PASSPORTS ─── */
+app.get('/api/passports', auth, async (req, res) => {
+  try {
+    let q = 'SELECT * FROM client_passports WHERE 1=1'; const p = [];
+    if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    q += ' ORDER BY created_at DESC';
+    res.json(await query(q, p));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/passports/:id', auth, async (req, res) => {
+  try {
+    const doc = await queryOne('SELECT * FROM client_passports WHERE id=?', [req.params.id]);
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+    if (isIsolated(req.session.user.role) && doc.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    res.json(doc);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/passports', auth, async (req, res) => {
+  try {
+    const { client_name, passport_num, passport_expiry, passport_file, notes } = req.body;
+    if (!client_name || !String(client_name).trim()) return res.status(400).json({ error: 'Client name is required' });
+    const r = await queryOne(
+      'INSERT INTO client_passports (client_name,passport_num,passport_expiry,passport_file,notes,owner_id,owner_name) VALUES (?,?,?,?,?,?,?) RETURNING id',
+      [client_name.trim(), passport_num || '', cleanDate(passport_expiry) || '', passport_file || null, notes || '', req.session.user.id, req.session.user.display_name]);
+    res.json({ id: r.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/passports/:id', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const doc = await queryOne('SELECT owner_id FROM client_passports WHERE id=?', [req.params.id]);
+      if (!doc || doc.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    const { client_name, passport_num, passport_expiry, passport_file, notes } = req.body;
+    if (!client_name || !String(client_name).trim()) return res.status(400).json({ error: 'Client name is required' });
+    await run('UPDATE client_passports SET client_name=?,passport_num=?,passport_expiry=?,passport_file=?,notes=? WHERE id=?',
+      [client_name.trim(), passport_num || '', cleanDate(passport_expiry) || '', passport_file || null, notes || '', req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/passports/:id', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const doc = await queryOne('SELECT owner_id FROM client_passports WHERE id=?', [req.params.id]);
+      if (!doc || doc.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    await run('DELETE FROM client_passports WHERE id=?', [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
