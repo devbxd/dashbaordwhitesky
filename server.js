@@ -23,8 +23,12 @@ app.set('trust proxy', 1); // behind Render's proxy — needed so req.protocol r
 const PORT = process.env.PORT || 3000;
 const SHEET_ID = '1gPYfTzGNpV7B_i2sv87p88EGmAN5uvQB58AsEr4lZWY';
 
+if (!process.env.DATABASE_URL) {
+  console.error('FATAL: DATABASE_URL environment variable is not set.');
+  process.exit(1);
+}
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_T5CwZxGr9EVW@ep-small-salad-asns7h0n.c-4.eu-central-1.aws.neon.tech/neondb?sslmode=require',
+  connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
@@ -388,7 +392,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
   }
 }));
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'whitesky-secret-2024',
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 }
