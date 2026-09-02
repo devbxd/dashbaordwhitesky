@@ -18,6 +18,14 @@ Ouvre le terminal (cmd) dans le dossier, puis tape :
 npm install
 ```
 
+### 4. Créer le fichier `.env`
+Crée un fichier `.env` à la racine du projet avec au minimum :
+```
+DATABASE_URL=postgres://...
+SESSION_SECRET=une-longue-chaine-aleatoire
+```
+Le serveur refuse de démarrer si l'une des deux manque (voir la section Configuration plus bas).
+
 ---
 
 ## Lancer l'application
@@ -47,23 +55,32 @@ Tu verras :
 
 ---
 
-## Comptes par défaut
+## Configuration (variables d'environnement)
 
-| Utilisateur | Mot de passe   | Accès                          |
-|-------------|----------------|--------------------------------|
-| patron      | whitesky2024   | Tout — toutes les factures     |
-| employe     | staff2024      | Ses propres factures uniquement|
+Le serveur refuse de démarrer sans ces variables :
 
-Tu peux ajouter d'autres utilisateurs dans Paramètres (patron uniquement).
+| Variable         | Rôle                                                        |
+|------------------|--------------------------------------------------------------|
+| `DATABASE_URL`   | Connexion PostgreSQL                                         |
+| `SESSION_SECRET` | Clé de signature des sessions (obligatoire en production)    |
+
+Optionnelles — ne fixent le mot de passe du compte que **la toute première fois** que ce compte est créé en base (jamais recréées ensuite) :
+
+| Variable            | Compte créé au premier démarrage |
+|---------------------|-----------------------------------|
+| `PATRON_PASSWORD`   | `majd` (rôle patron — accès total) |
+| `EMPLOYE_PASSWORD`  | `user` (rôle employé)              |
+| `CYBER_PASSWORD`    | `boudy` (rôle cyber)               |
+
+Si l'une d'elles n'est pas définie, un mot de passe aléatoire est généré et affiché **une seule fois** dans les logs du serveur au premier démarrage — note-le tout de suite, il ne sera plus jamais réaffiché.
+
+Change ensuite les mots de passe depuis Paramètres (patron uniquement) pour les utilisateurs suivants.
 
 ---
 
 ## Base de données
 
-Les données sont stockées dans : `db/whitesky.db`  
-C'est un fichier SQLite — **sauvegarde ce fichier régulièrement !**
-
-Pour faire une sauvegarde : copie simplement `db/whitesky.db` ailleurs.
+Les données sont stockées dans PostgreSQL (variable `DATABASE_URL`). Fais des sauvegardes régulières via `pg_dump` — ce n'est plus un fichier unique à copier comme avec SQLite.
 
 ---
 
@@ -74,8 +91,7 @@ whitesky-app/
 ├── server.js          ← Serveur principal
 ├── package.json       ← Dépendances
 ├── START.bat          ← Lancer sur Windows
-├── db/
-│   └── whitesky.db   ← Base de données (créée au premier lancement)
+├── .env               ← DATABASE_URL, SESSION_SECRET (non commité)
 └── public/
     ├── index.html     ← Interface principale
     ├── css/app.css    ← Styles

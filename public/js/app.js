@@ -270,6 +270,14 @@ function applyBranding(){
   const isPatron=currentUser&&currentUser.role==='patron';
   document.getElementById('admin-nav-item')?.classList.toggle('hidden',!isPatron);
   document.getElementById('admin-sep')?.classList.toggle('hidden',!isPatron);
+  // M&S Cyber Systems isn't a travel agency — these modules (ticket sales, hotel bookings,
+  // visas, group trips, passport docs) don't apply to that business, so they're hidden for
+  // the 'cyber' account instead of cluttering its sidebar with irrelevant sections.
+  const travelOnlyPages=['tickets','new-ticket','hotels','new-hotel','visas','new-visa','groups','new-group','passports','new-passport'];
+  const travelOnlySeps=['hotels-sep','visas-sep','groups-sep','passports-sep'];
+  travelOnlyPages.forEach(p=>document.querySelector(`.nav-item[data-page="${p}"]`)?.classList.toggle('hidden',cyber));
+  travelOnlySeps.forEach(id=>document.getElementById(id)?.classList.toggle('hidden',cyber));
+  document.querySelector('.nav-sep[data-sep="tickets"]')?.classList.toggle('hidden',cyber);
 }
 
 /* NAV */
@@ -1160,7 +1168,7 @@ async function pageSettings(mc){const isP=currentUser.role==='patron';const canE
 ${canEdit?`<div class="card" style="max-width:640px"><div class="card-header"><span class="card-title"><i class="ti ti-mail" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Email Sending</span></div><p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">Lets you send invoices to clients by email. Use your email provider's SMTP details — for Gmail, that's an <a href="https://support.google.com/accounts/answer/185833" target="_blank" style="color:#1A6FB5">app password</a>, not your normal password.</p><div class="form-grid2" style="gap:14px"><div class="form-group"><label class="form-label">SMTP host</label><input class="form-input" id="s-smtp-host" value="${settings.smtp_host||''}" placeholder="smtp.gmail.com"/></div><div class="form-group"><label class="form-label">Port</label><input type="number" class="form-input" id="s-smtp-port" value="${settings.smtp_port||587}"/></div><div class="form-group"><label class="form-label">Username</label><input class="form-input" id="s-smtp-user" value="${settings.smtp_user||''}" placeholder="you@yourcompany.com"/></div><div class="form-group"><label class="form-label">Password</label><input type="password" class="form-input" id="s-smtp-pass" value="${settings.smtp_pass||''}"/></div><div class="form-group full"><label class="form-label">"From" address <span style="color:#aaa;font-weight:400">(optional, defaults to username)</span></label><input class="form-input" id="s-smtp-from" value="${settings.smtp_from||''}"/></div></div><button class="btn-save" onclick="saveSmtpSettings()">Save Email Settings</button></div>`:''}
 ${isP?`<div class="card" style="max-width:640px"><div class="card-header"><span class="card-title">Users</span><button class="btn-new" onclick="openUserModal()"><i class="ti ti-plus"></i> Add</button></div>${users.map(u=>`<div class="access-row"><div style="display:flex;align-items:center;gap:12px"><div class="user-avatar" style="width:38px;height:38px;font-size:13px;background:${u.role==='patron'?'#deeeff':'#fff4e0'};color:${u.role==='patron'?'#0a3258':'#a05c00'}">${initials(u.display_name)}</div><div><div style="font-size:14px;font-weight:700">${u.display_name}</div><div style="font-size:12px;color:#aaa">${u.username} — ${u.role==='patron'?'Administrator':'Staff'}</div></div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge ${u.role==='patron'?'badge-paid':'badge-pending'}">${u.role==='patron'?'Admin':'Staff'}</span><button class="action-btn" onclick="openUserModal(${u.id})"><i class="ti ti-edit"></i></button>${u.id!==currentUser.id?`<button class="action-btn danger" onclick="deleteUser(${u.id})"><i class="ti ti-trash"></i></button>`:''}</div></div>`).join('')}</div>`:''}
 `;}
-const DESKTOP_APP_URL='https://dashbaordwhitesky-7fw2.onrender.com/download';
+const DESKTOP_APP_URL='https://dashbaordwhitesky-7fw2.onrender.com/manifest.html';
 function copyDownloadLink(){const el=document.getElementById('dl-link');el.select();navigator.clipboard.writeText(el.value).then(()=>toast('✅ Link copied','success')).catch(()=>toast('Could not copy — select and copy manually','error'));}
 
 async function saveSettings(){const body={company_name:document.getElementById('s-name')?.value.trim(),company_address:document.getElementById('s-addr')?.value.trim(),company_phone_p:document.getElementById('s-phone-p')?.value.trim(),company_phone_m:document.getElementById('s-phone-m')?.value.trim(),company_email:document.getElementById('s-email')?.value.trim(),invoice_currency:document.getElementById('s-currency')?.value,invoice_due_days:document.getElementById('s-due-days')?.value,invoice_footer:document.getElementById('s-footer')?.value,lang:document.getElementById('s-lang')?.value||'en'};await api('POST','/api/settings',body);settings=await api('GET','/api/settings');toast('✅ Settings saved','success');}
@@ -1182,9 +1190,9 @@ async function pageAdmin(mc){
   const[users,invites]=await Promise.all([api('GET','/api/users'),api('GET','/api/invites')]);
   const roleLabel={patron:'Administrator',employe:'Staff',demo:'Demo',cyber:'CEO (Cyber)',client:'Client (self-registered)'};
   mc.innerHTML=`
-<div class="page-header"><div><div class="page-title">Admin</div><div class="page-sub">Download link, invite codes and account access — visible to the owner only</div></div></div>
-<div class="card" style="max-width:680px"><div class="card-header"><span class="card-title"><i class="ti ti-download" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Download Link</span></div>
-  <p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">Share this link with anyone — it's just the app installer, downloading it doesn't create an account by itself. Send it as many times as you like.</p>
+<div class="page-header"><div><div class="page-title">Admin</div><div class="page-sub">Sales page link, invite codes and account access — visible to the owner only</div></div></div>
+<div class="card" style="max-width:680px"><div class="card-header"><span class="card-title"><i class="ti ti-download" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Sales Page Link</span></div>
+  <p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">Share this link with prospects — it's the public pitch (screenshots, pricing, download button), not an account by itself. Send it as many times as you like; give out an invite code separately once they've paid.</p>
   <div style="display:flex;gap:8px;align-items:center">
     <input class="form-input" id="dl-link" readonly value="${DESKTOP_APP_URL}" style="font-family:monospace;font-size:12px"/>
     <button class="btn-secondary" onclick="copyDownloadLink()"><i class="ti ti-copy"></i> Copy link</button>

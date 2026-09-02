@@ -8,6 +8,8 @@ const { google } = require('googleapis');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
 const nodemailer = require('nodemailer');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 // The live tables predate some of this schema and were created with real DATE/NUMERIC
 // column types (not the TEXT/REAL this file's CREATE TABLE IF NOT EXISTS describes — a
@@ -22,9 +24,17 @@ const app = express();
 app.set('trust proxy', 1); // behind Render's proxy — needed so req.protocol reports https, not http
 const PORT = process.env.PORT || 3000;
 const SHEET_ID = '1gPYfTzGNpV7B_i2sv87p88EGmAN5uvQB58AsEr4lZWY';
+const isProd = process.env.NODE_ENV === 'production';
 
 if (!process.env.DATABASE_URL) {
   console.error('FATAL: DATABASE_URL environment variable is not set.');
+  process.exit(1);
+}
+if (isProd && !process.env.SESSION_SECRET) {
+  // A missing SESSION_SECRET used to fall back to a random value generated at boot — every
+  // restart/redeploy then invalidated every logged-in session with no warning. Failing fast
+  // here instead makes that misconfiguration visible immediately instead of days later.
+  console.error('FATAL: SESSION_SECRET environment variable is not set.');
   process.exit(1);
 }
 const pool = new Pool({
@@ -48,6 +58,17 @@ function cleanDate(d) {
 // isolated sandbox automatically, no manual account creation needed.
 const ISOLATED_ROLES = ['demo', 'cyber', 'client'];
 const isIsolated = (role) => ISOLATED_ROLES.includes(role);
+// 'patron' queries had no owner filter at all, so isolated tenants' data (each scoped only to
+// its own owner_id) was showing up for patron too. This fragment excludes it — patron only
+// sees the shared WhiteSky data (its own + 'employe' rows) plus legacy rows with no owner_id.
+const ISOLATED_ROLES_SQL = ISOLATED_ROLES.map(r => `'${r}'`).join(',');
+const ISOLATED_OWNER_COND = `(owner_id IS NULL OR owner_id NOT IN (SELECT id FROM users WHERE role IN (${ISOLATED_ROLES_SQL})))`;
+const PATRON_EXCLUDE_ISOLATED = ' AND ' + ISOLATED_OWNER_COND;
+async function isOwnedByIsolatedUser(ownerId) {
+  if (!ownerId) return false;
+  const owner = await queryOne('SELECT role FROM users WHERE id=?', [ownerId]);
+  return !!owner && isIsolated(owner.role);
+}
 // Settings namespace: 'cyber' is a single fixed account so it gets a fixed prefix; 'client'
 // covers potentially many self-registered tenants, so each one is namespaced by their own
 // user id instead — otherwise every self-registered agency would share one branding.
@@ -371,14 +392,29 @@ async function initDB() {
     await pool.query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING', [k, v]);
   }
 
+  // Seed passwords come from env vars (never hardcoded — a hardcoded seed password ends up
+  // committed to git forever, even after it's changed). If an env var isn't set, a random
+  // one is generated and printed once to the server log — this only runs the first time the
+  // account is created (guarded by the existence checks below), so it never resets a live
+  // password on later deploys.
+  function seedPassword(envVar) {
+    if (process.env[envVar]) return process.env[envVar];
+    const generated = crypto.randomBytes(9).toString('base64url');
+    console.log(`⚠️  ${envVar} not set — generated a random password for this account: ${generated}`);
+    console.log(`⚠️  Save it now and change it from Settings after first login. Set ${envVar} to pin it instead.`);
+    return generated;
+  }
+
   const count = await queryOne('SELECT COUNT(*) as c FROM users');
   if (parseInt(count.c) === 0) {
     await pool.query('INSERT INTO users (username,password,role,display_name) VALUES ($1,$2,$3,$4)',
-      ['majd', bcrypt.hashSync('whitesky67758123', 10), 'patron', 'Majd']);
+      ['majd', bcrypt.hashSync(seedPassword('PATRON_PASSWORD'), 10), 'patron', 'Majd']);
     await pool.query('INSERT INTO users (username,password,role,display_name) VALUES ($1,$2,$3,$4)',
-      ['user', bcrypt.hashSync('whitesky00123', 10), 'employe', 'User']);
+      ['user', bcrypt.hashSync(seedPassword('EMPLOYE_PASSWORD'), 10), 'employe', 'User']);
   }
-  // 'demo' role: fully isolated sandbox account for prospect demos — sees only what it creates itself.
+  // 'demo' role: fully isolated sandbox account for prospect demos — sees only what it creates
+  // itself, so a weak, well-known password here is intentional (it's a public sales demo, not
+  // a real account) rather than a leak.
   const demoExists = await queryOne('SELECT id FROM users WHERE username=?', ['test']);
   if (!demoExists) {
     await pool.query('INSERT INTO users (username,password,role,display_name) VALUES ($1,$2,$3,$4)',
@@ -389,13 +425,20 @@ async function initDB() {
   const boudyExists = await queryOne('SELECT id FROM users WHERE username=?', ['boudy']);
   if (!boudyExists) {
     await pool.query('INSERT INTO users (username,password,role,display_name) VALUES ($1,$2,$3,$4)',
-      ['boudy', bcrypt.hashSync('Boudy12345', 10), 'cyber', 'Boudy Hajj']);
-    console.log('✅  M&S Cyber Systems account created — username: boudy / password: Boudy12345');
+      ['boudy', bcrypt.hashSync(seedPassword('CYBER_PASSWORD'), 10), 'cyber', 'Boudy Hajj']);
+    console.log('✅  M&S Cyber Systems account created — username: boudy');
   }
 
   console.log('✅  Base de données PostgreSQL prête');
 }
 
+app.use(helmet({
+  // The UI builds its markup as strings with inline onclick="..." handlers and one inline
+  // <script> (plus a cdnjs-hosted pdf.js) — a default CSP would block all of that. Turning it
+  // off keeps helmet's other protections (HSTS, X-Frame-Options, X-Content-Type-Options, etc.)
+  // without breaking the live app; a real CSP needs the inline handlers rewritten first.
+  contentSecurityPolicy: false,
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -408,8 +451,27 @@ app.use(session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 }
+  cookie: {
+    maxAge: 30 * 24 * 60 * 60 * 1000,
+    httpOnly: true,
+    sameSite: 'lax', // blocks cross-site form/script requests from riding the session cookie (basic CSRF mitigation)
+    secure: isProd, // HTTPS-only cookie in production (Render terminates TLS; trust proxy is already set above)
+  }
 }));
+
+// Login/signup are the only unauthenticated endpoints that touch passwords or create
+// accounts — everything else requires an existing session, so brute-forcing has to start
+// here. Limits are per-IP; generous enough for a mistyped password, tight enough to make
+// guessing impractical.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Please wait a few minutes and try again.' },
+});
+app.use('/api/login', loginLimiter);
+app.use('/api/signup', loginLimiter);
 
 async function auth(req, res, next) {
   if (!req.session.user) return res.status(401).json({ error: 'Non autorisé' });
@@ -525,7 +587,9 @@ app.get('/api/clients', auth, async (req, res) => {
     if (isIsolated(req.session.user.role)) {
       return res.json(await query('SELECT * FROM clients WHERE owner_id=? ORDER BY name', [req.session.user.id]));
     }
-    res.json(await query('SELECT * FROM clients ORDER BY name'));
+    let clientsQ = 'SELECT * FROM clients WHERE 1=1';
+    if (req.session.user.role === 'patron') clientsQ += PATRON_EXCLUDE_ISOLATED;
+    res.json(await query(clientsQ + ' ORDER BY name'));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/clients', auth, async (req, res) => {
@@ -540,9 +604,10 @@ app.post('/api/clients', auth, async (req, res) => {
 });
 app.put('/api/clients/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const c = await queryOne('SELECT owner_id FROM clients WHERE id=?', [req.params.id]);
-      if (!c || c.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!c || c.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && c && await isOwnedByIsolatedUser(c.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     const { name, email, phone, fax, address, city, tag, notes } = req.body;
     await run('UPDATE clients SET name=?,email=?,phone=?,fax=?,address=?,city=?,tag=?,notes=? WHERE id=?',
@@ -552,9 +617,10 @@ app.put('/api/clients/:id', auth, async (req, res) => {
 });
 app.delete('/api/clients/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const c = await queryOne('SELECT owner_id FROM clients WHERE id=?', [req.params.id]);
-      if (!c || c.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!c || c.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && c && await isOwnedByIsolatedUser(c.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('DELETE FROM clients WHERE id=?', [req.params.id]); res.json({ success: true });
   }
@@ -580,7 +646,8 @@ app.get('/api/invoices', auth, async (req, res) => {
   try {
     const { from, to, status, search } = req.query;
     let q = 'SELECT * FROM invoices WHERE 1=1'; const p = [];
-    if (req.session.user.role === 'employe') { q += ' AND (owner_id=? OR client_id IS NOT NULL)'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') { q += PATRON_EXCLUDE_ISOLATED; }
     if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
     if (from) { q += ' AND date>=?'; p.push(from); }
     if (to) { q += ' AND date<=?'; p.push(to); }
@@ -594,7 +661,8 @@ app.get('/api/invoices/:id', auth, async (req, res) => {
   try {
     const inv = await queryOne('SELECT * FROM invoices WHERE id=?', [req.params.id]);
     if (!inv) return res.status(404).json({ error: 'Introuvable' });
-    if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id && !inv.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     const rows = await query('SELECT * FROM invoice_rows WHERE invoice_id=?', [inv.id]);
     const verifyUrl = `${req.protocol}://${req.get('host')}/verify/${inv.verify_token}`;
@@ -621,7 +689,8 @@ app.put('/api/invoices/:id', auth, async (req, res) => {
   try {
     const inv = await queryOne('SELECT * FROM invoices WHERE id=?', [req.params.id]);
     if (!inv) return res.status(404).json({ error: 'Introuvable' });
-    if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id && !inv.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     const { client_name, client_address, client_phone, client_fax, status, date, due_date, due_days, tax, deposit, notes, currency, rows } = req.body;
     const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
@@ -643,7 +712,8 @@ app.patch('/api/invoices/:id/status', auth, async (req, res) => {
   try {
     const inv = await queryOne('SELECT * FROM invoices WHERE id=?', [req.params.id]);
     if (!inv) return res.status(404).json({ error: 'Introuvable' });
-    if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id && !inv.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     await run('UPDATE invoices SET status=? WHERE id=?', [req.body.status, req.params.id]);
     // Leaving 'paid'/'partial' invalidates any recorded payment for this invoice, so the
@@ -657,7 +727,8 @@ app.delete('/api/invoices/:id', auth, async (req, res) => {
   try {
     const inv = await queryOne('SELECT * FROM invoices WHERE id=?', [req.params.id]);
     if (!inv) return res.status(404).json({ error: 'Introuvable' });
-    if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id && !inv.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     await run('DELETE FROM invoice_rows WHERE invoice_id=?', [req.params.id]);
     await run('DELETE FROM invoices WHERE id=?', [req.params.id]);
@@ -684,7 +755,8 @@ app.get('/api/quotes/next-num', auth, async (req, res) => {
 app.get('/api/quotes', auth, async (req, res) => {
   try {
     let q = 'SELECT * FROM quotes WHERE 1=1'; const p = [];
-    if (req.session.user.role === 'employe') { q += ' AND (owner_id=? OR client_id IS NOT NULL)'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') { q += PATRON_EXCLUDE_ISOLATED; }
     if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
     q += ' ORDER BY created_at DESC';
     res.json(await query(q, p));
@@ -694,7 +766,8 @@ app.get('/api/quotes/:id', auth, async (req, res) => {
   try {
     const qt = await queryOne('SELECT * FROM quotes WHERE id=?', [req.params.id]);
     if (!qt) return res.status(404).json({ error: 'Introuvable' });
-    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id && !qt.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(qt.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     const rows = await query('SELECT * FROM quote_rows WHERE quote_id=?', [qt.id]);
     res.json({ ...qt, rows });
@@ -719,7 +792,8 @@ app.put('/api/quotes/:id', auth, async (req, res) => {
   try {
     const qt = await queryOne('SELECT * FROM quotes WHERE id=?', [req.params.id]);
     if (!qt) return res.status(404).json({ error: 'Introuvable' });
-    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id && !qt.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(qt.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     const { client_name, client_address, client_phone, client_fax, status, date, valid_until, tax, deposit, notes, currency, rows } = req.body;
     const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
@@ -738,7 +812,8 @@ app.patch('/api/quotes/:id/status', auth, async (req, res) => {
   try {
     const qt = await queryOne('SELECT * FROM quotes WHERE id=?', [req.params.id]);
     if (!qt) return res.status(404).json({ error: 'Introuvable' });
-    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id && !qt.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(qt.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     await run('UPDATE quotes SET status=? WHERE id=?', [req.body.status, req.params.id]);
     res.json({ success: true });
@@ -748,7 +823,8 @@ app.delete('/api/quotes/:id', auth, async (req, res) => {
   try {
     const qt = await queryOne('SELECT * FROM quotes WHERE id=?', [req.params.id]);
     if (!qt) return res.status(404).json({ error: 'Introuvable' });
-    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id && !qt.client_id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(qt.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     await run('DELETE FROM quote_rows WHERE quote_id=?', [req.params.id]);
     await run('DELETE FROM quotes WHERE id=?', [req.params.id]);
@@ -759,6 +835,8 @@ app.post('/api/quotes/:id/convert', auth, async (req, res) => {
   try {
     const qt = await queryOne('SELECT * FROM quotes WHERE id=?', [req.params.id]);
     if (!qt) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(qt.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     if (qt.converted_invoice_id) return res.status(400).json({ error: 'Already converted' });
     const rows = await query('SELECT * FROM quote_rows WHERE quote_id=?', [qt.id]);
@@ -792,7 +870,9 @@ app.post('/api/quotes/:id/convert', auth, async (req, res) => {
 app.get('/api/items', auth, async (req, res) => {
   try {
     if (isIsolated(req.session.user.role)) return res.json(await query('SELECT * FROM items WHERE owner_id=? ORDER BY name', [req.session.user.id]));
-    res.json(await query('SELECT * FROM items ORDER BY name'));
+    let itemsQ = 'SELECT * FROM items WHERE 1=1';
+    if (req.session.user.role === 'patron') itemsQ += PATRON_EXCLUDE_ISOLATED;
+    res.json(await query(itemsQ + ' ORDER BY name'));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/items', auth, async (req, res) => {
@@ -807,9 +887,10 @@ app.post('/api/items', auth, async (req, res) => {
 });
 app.put('/api/items/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const it = await queryOne('SELECT owner_id FROM items WHERE id=?', [req.params.id]);
-      if (!it || it.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!it || it.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && it && await isOwnedByIsolatedUser(it.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     const { name, category, price, currency } = req.body;
     await run('UPDATE items SET name=?,category=?,price=?,currency=? WHERE id=?', [name, category || '', parseFloat(price) || 0, currency || 'KWD', req.params.id]);
@@ -818,9 +899,10 @@ app.put('/api/items/:id', auth, async (req, res) => {
 });
 app.delete('/api/items/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const it = await queryOne('SELECT owner_id FROM items WHERE id=?', [req.params.id]);
-      if (!it || it.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!it || it.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && it && await isOwnedByIsolatedUser(it.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('DELETE FROM items WHERE id=?', [req.params.id]);
     res.json({ success: true });
@@ -847,6 +929,7 @@ app.get('/api/credit-notes', auth, async (req, res) => {
   try {
     let q = 'SELECT * FROM credit_notes WHERE 1=1'; const p = [];
     if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') { q += PATRON_EXCLUDE_ISOLATED; }
     if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
     q += ' ORDER BY created_at DESC';
     res.json(await query(q, p));
@@ -856,6 +939,7 @@ app.get('/api/credit-notes/:id', auth, async (req, res) => {
   try {
     const cn = await queryOne('SELECT * FROM credit_notes WHERE id=?', [req.params.id]);
     if (!cn) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(cn.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && cn.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     res.json(cn);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -863,9 +947,10 @@ app.get('/api/credit-notes/:id', auth, async (req, res) => {
 app.post('/api/credit-notes', auth, async (req, res) => {
   try {
     const { num, invoice_id, invoice_num, client_name, date, reason, amount, currency } = req.body;
-    if (invoice_id && isIsolated(req.session.user.role)) {
+    if (invoice_id && (isIsolated(req.session.user.role) || req.session.user.role === 'patron')) {
       const inv = await queryOne('SELECT owner_id FROM invoices WHERE id=?', [invoice_id]);
-      if (!inv || inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!inv || inv.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && inv && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     const r = await queryOne(
       'INSERT INTO credit_notes (num,invoice_id,invoice_num,client_name,date,reason,amount,currency,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id',
@@ -878,6 +963,7 @@ app.delete('/api/credit-notes/:id', auth, async (req, res) => {
   try {
     const cn = await queryOne('SELECT * FROM credit_notes WHERE id=?', [req.params.id]);
     if (!cn) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(cn.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && cn.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     await run('DELETE FROM credit_notes WHERE id=?', [req.params.id]);
     res.json({ success: true });
@@ -903,6 +989,7 @@ app.get('/api/tickets', auth, async (req, res) => {
   try {
     let q = 'SELECT * FROM ticket_sales WHERE 1=1'; const p = [];
     if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') { q += PATRON_EXCLUDE_ISOLATED; }
     if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
     q += ' ORDER BY created_at DESC';
     res.json(await query(q, p));
@@ -912,6 +999,7 @@ app.get('/api/tickets/:id', auth, async (req, res) => {
   try {
     const t = await queryOne('SELECT * FROM ticket_sales WHERE id=?', [req.params.id]);
     if (!t) return res.status(404).json({ error: 'Not found' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(t.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && t.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     res.json(t);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -927,9 +1015,10 @@ app.post('/api/tickets', auth, async (req, res) => {
 });
 app.put('/api/tickets/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const t = await queryOne('SELECT owner_id FROM ticket_sales WHERE id=?', [req.params.id]);
-      if (!t || t.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!t || t.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && t && await isOwnedByIsolatedUser(t.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     const { airline, pnr, company, destination, passenger, date, system_issue, currency, net_price, selling_price, status, notes, ticket_type, client_id } = req.body;
     await run('UPDATE ticket_sales SET airline=?,pnr=?,company=?,destination=?,passenger=?,date=?,system_issue=?,currency=?,net_price=?,selling_price=?,status=?,notes=?,ticket_type=?,client_id=? WHERE id=?',
@@ -939,9 +1028,10 @@ app.put('/api/tickets/:id', auth, async (req, res) => {
 });
 app.patch('/api/tickets/:id/status', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const t = await queryOne('SELECT owner_id FROM ticket_sales WHERE id=?', [req.params.id]);
-      if (!t || t.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!t || t.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && t && await isOwnedByIsolatedUser(t.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('UPDATE ticket_sales SET status=? WHERE id=?', [req.body.status, req.params.id]);
     res.json({ success: true });
@@ -949,9 +1039,10 @@ app.patch('/api/tickets/:id/status', auth, async (req, res) => {
 });
 app.delete('/api/tickets/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const t = await queryOne('SELECT owner_id FROM ticket_sales WHERE id=?', [req.params.id]);
-      if (!t || t.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!t || t.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && t && await isOwnedByIsolatedUser(t.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('DELETE FROM ticket_sales WHERE id=?', [req.params.id]); res.json({ success: true });
   }
@@ -978,6 +1069,7 @@ app.get('/api/hotels', auth, async (req, res) => {
   try {
     let q = 'SELECT * FROM hotel_bookings WHERE 1=1'; const p = [];
     if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') { q += PATRON_EXCLUDE_ISOLATED; }
     if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
     q += ' ORDER BY created_at DESC';
     res.json(await query(q, p));
@@ -987,6 +1079,7 @@ app.get('/api/hotels/:id', auth, async (req, res) => {
   try {
     const h = await queryOne('SELECT * FROM hotel_bookings WHERE id=?', [req.params.id]);
     if (!h) return res.status(404).json({ error: 'Not found' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(h.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && h.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     res.json(h);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1002,9 +1095,10 @@ app.post('/api/hotels', auth, async (req, res) => {
 });
 app.put('/api/hotels/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const h = await queryOne('SELECT owner_id FROM hotel_bookings WHERE id=?', [req.params.id]);
-      if (!h || h.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!h || h.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && h && await isOwnedByIsolatedUser(h.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     const { hotel_name, confirmation_num, destination, room_type, passenger, checkin_date, checkout_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
     await run('UPDATE hotel_bookings SET hotel_name=?,confirmation_num=?,destination=?,room_type=?,passenger=?,checkin_date=?,checkout_date=?,currency=?,net_price=?,selling_price=?,status=?,notes=?,booking_type=?,client_id=? WHERE id=?',
@@ -1014,9 +1108,10 @@ app.put('/api/hotels/:id', auth, async (req, res) => {
 });
 app.patch('/api/hotels/:id/status', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const h = await queryOne('SELECT owner_id FROM hotel_bookings WHERE id=?', [req.params.id]);
-      if (!h || h.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!h || h.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && h && await isOwnedByIsolatedUser(h.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('UPDATE hotel_bookings SET status=? WHERE id=?', [req.body.status, req.params.id]);
     res.json({ success: true });
@@ -1024,9 +1119,10 @@ app.patch('/api/hotels/:id/status', auth, async (req, res) => {
 });
 app.delete('/api/hotels/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const h = await queryOne('SELECT owner_id FROM hotel_bookings WHERE id=?', [req.params.id]);
-      if (!h || h.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!h || h.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && h && await isOwnedByIsolatedUser(h.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('DELETE FROM hotel_bookings WHERE id=?', [req.params.id]); res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1052,6 +1148,7 @@ app.get('/api/visas', auth, async (req, res) => {
   try {
     let q = 'SELECT * FROM visas WHERE 1=1'; const p = [];
     if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') { q += PATRON_EXCLUDE_ISOLATED; }
     if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
     q += ' ORDER BY created_at DESC';
     res.json(await query(q, p));
@@ -1061,6 +1158,7 @@ app.get('/api/visas/:id', auth, async (req, res) => {
   try {
     const v = await queryOne('SELECT * FROM visas WHERE id=?', [req.params.id]);
     if (!v) return res.status(404).json({ error: 'Not found' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(v.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && v.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     res.json(v);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1076,9 +1174,10 @@ app.post('/api/visas', auth, async (req, res) => {
 });
 app.put('/api/visas/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const v = await queryOne('SELECT owner_id FROM visas WHERE id=?', [req.params.id]);
-      if (!v || v.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!v || v.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && v && await isOwnedByIsolatedUser(v.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     const { visa_type, country, passenger, passport_num, date, appointment_date, currency, net_price, selling_price, status, notes, booking_type, client_id, visa_file } = req.body;
     await run('UPDATE visas SET visa_type=?,country=?,passenger=?,passport_num=?,date=?,appointment_date=?,currency=?,net_price=?,selling_price=?,status=?,notes=?,booking_type=?,client_id=?,visa_file=? WHERE id=?',
@@ -1088,9 +1187,10 @@ app.put('/api/visas/:id', auth, async (req, res) => {
 });
 app.patch('/api/visas/:id/status', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const v = await queryOne('SELECT owner_id FROM visas WHERE id=?', [req.params.id]);
-      if (!v || v.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!v || v.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && v && await isOwnedByIsolatedUser(v.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('UPDATE visas SET status=? WHERE id=?', [req.body.status, req.params.id]);
     res.json({ success: true });
@@ -1098,9 +1198,10 @@ app.patch('/api/visas/:id/status', auth, async (req, res) => {
 });
 app.delete('/api/visas/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const v = await queryOne('SELECT owner_id FROM visas WHERE id=?', [req.params.id]);
-      if (!v || v.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!v || v.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && v && await isOwnedByIsolatedUser(v.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('DELETE FROM visas WHERE id=?', [req.params.id]); res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1126,6 +1227,7 @@ app.get('/api/groups', auth, async (req, res) => {
   try {
     let q = 'SELECT * FROM groups_trips WHERE 1=1'; const p = [];
     if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') { q += PATRON_EXCLUDE_ISOLATED; }
     if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
     q += ' ORDER BY created_at DESC';
     const groups = await query(q, p);
@@ -1142,6 +1244,7 @@ app.get('/api/groups/:id', auth, async (req, res) => {
   try {
     const g = await queryOne('SELECT * FROM groups_trips WHERE id=?', [req.params.id]);
     if (!g) return res.status(404).json({ error: 'Not found' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(g.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && g.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     g.travelers = await query('SELECT * FROM group_travelers WHERE group_id=? ORDER BY id', [req.params.id]);
     res.json(g);
@@ -1162,9 +1265,10 @@ app.post('/api/groups', auth, async (req, res) => {
 });
 app.put('/api/groups/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const g = await queryOne('SELECT owner_id FROM groups_trips WHERE id=?', [req.params.id]);
-      if (!g || g.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!g || g.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && g && await isOwnedByIsolatedUser(g.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     const { name, destination, departure_date, return_date, currency, status, notes, travelers } = req.body;
     await run('UPDATE groups_trips SET name=?,destination=?,departure_date=?,return_date=?,currency=?,status=?,notes=? WHERE id=?',
@@ -1179,9 +1283,10 @@ app.put('/api/groups/:id', auth, async (req, res) => {
 });
 app.delete('/api/groups/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const g = await queryOne('SELECT owner_id FROM groups_trips WHERE id=?', [req.params.id]);
-      if (!g || g.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!g || g.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && g && await isOwnedByIsolatedUser(g.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('DELETE FROM group_travelers WHERE group_id=?', [req.params.id]);
     await run('DELETE FROM groups_trips WHERE id=?', [req.params.id]);
@@ -1194,6 +1299,7 @@ app.get('/api/passports', auth, async (req, res) => {
   try {
     let q = 'SELECT * FROM client_passports WHERE 1=1'; const p = [];
     if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') { q += PATRON_EXCLUDE_ISOLATED; }
     if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
     q += ' ORDER BY created_at DESC';
     res.json(await query(q, p));
@@ -1203,6 +1309,7 @@ app.get('/api/passports/:id', auth, async (req, res) => {
   try {
     const doc = await queryOne('SELECT * FROM client_passports WHERE id=?', [req.params.id]);
     if (!doc) return res.status(404).json({ error: 'Not found' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(doc.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && doc.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     res.json(doc);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1219,9 +1326,10 @@ app.post('/api/passports', auth, async (req, res) => {
 });
 app.put('/api/passports/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const doc = await queryOne('SELECT owner_id FROM client_passports WHERE id=?', [req.params.id]);
-      if (!doc || doc.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!doc || doc.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && doc && await isOwnedByIsolatedUser(doc.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     const { client_name, passport_num, passport_expiry, passport_file, notes } = req.body;
     if (!client_name || !String(client_name).trim()) return res.status(400).json({ error: 'Client name is required' });
@@ -1232,9 +1340,10 @@ app.put('/api/passports/:id', auth, async (req, res) => {
 });
 app.delete('/api/passports/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    {
       const doc = await queryOne('SELECT owner_id FROM client_passports WHERE id=?', [req.params.id]);
-      if (!doc || doc.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!doc || doc.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && doc && await isOwnedByIsolatedUser(doc.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('DELETE FROM client_passports WHERE id=?', [req.params.id]);
     res.json({ success: true });
@@ -1245,6 +1354,7 @@ app.get('/api/invoices/:id/payments', auth, async (req, res) => {
   try {
     const inv = await queryOne('SELECT * FROM invoices WHERE id=?', [req.params.id]);
     if (!inv) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     const rows = await query('SELECT * FROM payments WHERE invoice_id=? ORDER BY created_at ASC', [inv.id]);
     const totalPaid = rows.reduce((a, p) => a + (parseFloat(p.amount) || 0), 0);
@@ -1267,6 +1377,7 @@ app.post('/api/invoices/:id/send-email', auth, async (req, res) => {
   try {
     const inv = await queryOne('SELECT * FROM invoices WHERE id=?', [req.params.id]);
     if (!inv) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     const { to, message } = req.body;
     if (!to) return res.status(400).json({ error: 'Recipient email is required' });
@@ -1314,19 +1425,23 @@ app.get('/api/payments', auth, async (req, res) => {
       return res.json(await query(
         `SELECT payments.* FROM payments JOIN invoices ON invoices.id=payments.invoice_id WHERE ${conds.join(' AND ')} ORDER BY payments.created_at DESC`, p));
     }
-    let q = 'SELECT * FROM payments WHERE 1=1'; const p = [];
-    if (from) { q += ' AND date>=?'; p.push(from); }
-    if (to) { q += ' AND date<=?'; p.push(to); }
-    q += ' ORDER BY created_at DESC';
+    let conds = ['1=1']; const p = [];
+    if (req.session.user.role === 'employe') { conds.push('invoices.owner_id=?'); p.push(req.session.user.id); }
+    if (from) { conds.push('payments.date>=?'); p.push(from); }
+    if (to) { conds.push('payments.date<=?'); p.push(to); }
+    let q = `SELECT payments.* FROM payments LEFT JOIN invoices ON invoices.id=payments.invoice_id WHERE ${conds.join(' AND ')}`;
+    if (req.session.user.role === 'patron') q += PATRON_EXCLUDE_ISOLATED;
+    q += ' ORDER BY payments.created_at DESC';
     res.json(await query(q, p));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/payments', auth, async (req, res) => {
   try {
     const { invoice_id, invoice_num, client_name, amount, method, reference, date, notes } = req.body;
-    if (isIsolated(req.session.user.role) && invoice_id) {
+    if (invoice_id && (isIsolated(req.session.user.role) || req.session.user.role === 'patron')) {
       const inv = await queryOne('SELECT owner_id FROM invoices WHERE id=?', [invoice_id]);
-      if (!inv || inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && (!inv || inv.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && inv && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     const r = await queryOne(
       'INSERT INTO payments (invoice_id,invoice_num,client_name,amount,method,reference,date,notes) VALUES (?,?,?,?,?,?,?,?) RETURNING id',
@@ -1345,11 +1460,12 @@ app.post('/api/payments', auth, async (req, res) => {
 });
 app.delete('/api/payments/:id', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
+    if (isIsolated(req.session.user.role) || req.session.user.role === 'patron') {
       const pay = await queryOne('SELECT invoice_id FROM payments WHERE id=?', [req.params.id]);
       if (pay && pay.invoice_id) {
         const inv = await queryOne('SELECT owner_id FROM invoices WHERE id=?', [pay.invoice_id]);
-        if (!inv || inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+        if (isIsolated(req.session.user.role) && (!inv || inv.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+        if (req.session.user.role === 'patron' && inv && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
       }
     }
     await run('DELETE FROM payments WHERE id=?', [req.params.id]); res.json({ success: true });
@@ -1362,10 +1478,12 @@ app.get('/api/reports/summary', auth, async (req, res) => {
     const { from, to } = req.query;
     const isIsolatedUser = isIsolated(req.session.user.role);
 
+    const isPatron = req.session.user.role === 'patron';
     let invConds = []; const invP = [];
     if (from) { invConds.push('date>=?'); invP.push(from); }
     if (to) { invConds.push('date<=?'); invP.push(to); }
     if (isIsolatedUser) { invConds.push('owner_id=?'); invP.push(req.session.user.id); }
+    if (isPatron) invConds.push(ISOLATED_OWNER_COND);
     const invW = invConds.length ? 'WHERE ' + invConds.join(' AND ') : '';
     const inv = await query(`SELECT * FROM invoices ${invW}`, invP);
 
@@ -1377,10 +1495,11 @@ app.get('/api/reports/summary', auth, async (req, res) => {
       pays = await query(`SELECT payments.* FROM payments JOIN invoices ON invoices.id=payments.invoice_id WHERE ${payConds.join(' AND ')}`, payP);
     } else {
       let payConds = []; const payP = [];
-      if (from) { payConds.push('date>=?'); payP.push(from); }
-      if (to) { payConds.push('date<=?'); payP.push(to); }
+      if (from) { payConds.push('payments.date>=?'); payP.push(from); }
+      if (to) { payConds.push('payments.date<=?'); payP.push(to); }
+      if (isPatron) payConds.push(ISOLATED_OWNER_COND);
       const payW = payConds.length ? 'WHERE ' + payConds.join(' AND ') : '';
-      pays = await query(`SELECT * FROM payments ${payW}`, payP);
+      pays = await query(`SELECT payments.* FROM payments LEFT JOIN invoices ON invoices.id=payments.invoice_id ${payW}`, payP);
     }
 
     const byMonth = {};
@@ -1391,7 +1510,9 @@ app.get('/api/reports/summary', auth, async (req, res) => {
     for (const i of inv) byClient[i.client_name] = (byClient[i.client_name] || 0) + i.total;
     const countResult = isIsolatedUser
       ? await queryOne('SELECT COUNT(*) as c FROM clients WHERE owner_id=?', [req.session.user.id])
-      : await queryOne('SELECT COUNT(*) as c FROM clients');
+      : isPatron
+        ? await queryOne(`SELECT COUNT(*) as c FROM clients WHERE ${ISOLATED_OWNER_COND}`)
+        : await queryOne('SELECT COUNT(*) as c FROM clients');
     res.json({
       paid: byStatus.paid, pending: byStatus.pending, overdue: byStatus.overdue, draft: byStatus.draft,
       totalPayments: pays.reduce((a, p) => a + (parseFloat(p.amount)||0), 0),
