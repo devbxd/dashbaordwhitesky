@@ -313,7 +313,11 @@ function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.clas
 
 /* DASHBOARD */
 function deadlineWhen(days){if(days<0)return`${-days}d overdue`;if(days===0)return'Today';if(days===1)return'Tomorrow';return`in ${days}d`;}
-async function pageDashboard(mc){const[invData,rpt,upcoming]=await Promise.all([api('GET','/api/invoices'),api('GET','/api/reports/summary'),api('GET','/api/upcoming')]);allInvoices=invData;const out=allInvoices.filter(i=>i.status!=='paid'&&i.status!=='draft');
+async function pageDashboard(mc){
+try{
+const[invData,rpt]=await Promise.all([api('GET','/api/invoices'),api('GET','/api/reports/summary')]);
+let upcoming=[];try{const u=await api('GET','/api/upcoming');if(Array.isArray(u))upcoming=u;}catch(e){upcoming=[];}
+allInvoices=invData;const out=allInvoices.filter(i=>i.status!=='paid'&&i.status!=='draft');
 const upcomingHtml=(upcoming||[]).map(u=>`<div class="deadline-row ${u.urgency}"><div class="deadline-stripe"></div><div class="deadline-icon"><i class="ti ${u.icon}"></i></div><div class="deadline-body"><div class="deadline-title">${u.title}</div><div class="deadline-sub">${u.sub}</div></div><div class="deadline-when">${deadlineWhen(u.daysUntil)}</div></div>`).join('');
 mc.innerHTML=`
 <div class="page-header"><div><div class="page-title">Dashboard</div><div class="page-sub">${new Date().toLocaleDateString('en-US',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</div></div><div class="header-actions"><button class="btn-new" onclick="showPage('new-invoice')"><i class="ti ti-plus"></i> New Invoice</button></div></div>
@@ -337,7 +341,11 @@ ${upcoming&&upcoming.length?`<div class="card"><div class="card-header"><span cl
 <div class="card"><div class="card-header"><span class="card-title"><i class="ti ti-clock" style="vertical-align:-2px;margin-right:6px;color:#a05c00"></i>Outstanding Invoices</span><button class="btn-secondary" onclick="showPage('invoices')" style="font-size:12px;padding:5px 10px">View all</button></div>
 <div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Due</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody>
 ${out.length===0?`<tr><td colspan="7"><div class="empty-state"><i class="ti ti-mood-happy"></i><h3>No outstanding invoices</h3></div></td></tr>`:out.map(i=>`<tr><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewInvoice(${i.id})">${i.num}</td><td>${i.client_name}</td><td>${fmtDate(i.date)}</td><td>${fmtDate(i.due_date)}</td><td style="font-weight:700">${fmt(i.total,i.currency)}</td><td>${statusBadge(i.status)}</td><td></td></tr>`).join('')}
-</tbody></table></div></div>`;}
+</tbody></table></div></div>`;
+}catch(e){
+mc.innerHTML=`<div class="empty-state"><i class="ti ti-alert-triangle"></i><h3>Couldn't load the dashboard</h3><p>${e.message||'Something went wrong.'}</p><button class="btn-new" onclick="showPage('dashboard')" style="margin-top:1rem"><i class="ti ti-refresh"></i> Retry</button></div>`;
+}
+}
 
 /* CLIENTS */
 async function pageClients(mc){allClients=await api('GET','/api/clients');renderClientsPage(mc,allClients);}

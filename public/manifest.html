@@ -77,9 +77,6 @@
   .btn-sm{padding:8px 14px; font-size:13px}
 
   section{padding:88px 0}
-  .eyebrow{font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--brass-deep); font-weight:600; display:flex; align-items:center; gap:10px}
-  .eyebrow::before{content:""; width:22px; height:1px; background:var(--brass); display:inline-block}
-
   /* ---- hero ---- */
   .hero{padding:64px 0 40px}
   .hero-grid{display:grid; grid-template-columns:1.15fr 1fr; gap:56px; align-items:center}
@@ -140,20 +137,6 @@
   .shot figcaption{padding:12px 16px; font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-faint); border-top:1px solid var(--line-soft)}
   figure{margin:0}
 
-  /* ---- why one-time, shown as an actual receipt ---- */
-  .receipt-wrap{display:flex; justify-content:center}
-  .receipt{width:100%; max-width:420px; background:var(--surface); border:1px solid var(--line); border-radius:6px 6px 0 0; padding:36px 32px 30px; box-shadow:var(--shadow-lg); position:relative}
-  .receipt::after{content:""; display:block; position:absolute; left:0; right:0; bottom:-13px; height:14px; background:linear-gradient(-45deg, var(--paper) 8px, transparent 0), linear-gradient(45deg, var(--paper) 8px, transparent 0); background-size:16px 16px; background-position:bottom left; background-repeat:repeat-x}
-  .receipt-title{text-align:center; margin-bottom:22px}
-  .receipt-title .eyebrow{justify-content:center; margin-bottom:8px}
-  .receipt-title h2{font-size:22px}
-  .r-row{display:flex; justify-content:space-between; gap:12px; font-family:"IBM Plex Mono",monospace; font-size:13px; padding:8px 0; color:var(--ink-soft); border-bottom:1px dashed var(--line)}
-  .r-row.muted{color:var(--ink-faint); font-style:italic; border-bottom:none; justify-content:center; font-size:11.5px; padding-top:4px}
-  .r-total{display:flex; justify-content:space-between; align-items:baseline; margin-top:14px; padding-top:14px; border-top:2px solid var(--ink); font-family:"IBM Plex Mono",monospace}
-  .r-total span:first-child{font-size:14px; font-weight:700}
-  .r-total span:last-child{font-size:22px; font-weight:700; color:var(--brass-deep)}
-  .r-save{text-align:center; margin-top:16px; font-size:13px; color:var(--success); font-weight:600}
-
   /* ---- pricing ---- */
   .price-wrap{display:flex; justify-content:center}
   .ticket{display:grid; grid-template-columns:1fr 190px; max-width:760px; width:100%; background:var(--surface); border:1px solid var(--line); border-radius:18px; box-shadow:var(--shadow-lg); overflow:hidden}
@@ -196,7 +179,6 @@
     .hero-grid{grid-template-columns:1fr}
     .hero h1{font-size:36px}
     .shots-row{grid-template-columns:1fr}
-    .receipt{padding:32px 24px}
     .ticket{grid-template-columns:1fr}
     .ticket-stub{border-left:none; border-top:2px dashed rgba(255,255,255,.3)}
     .ticket-stub::before,.ticket-stub::after{left:50%; top:-11px; transform:translateX(-50%)}
@@ -225,7 +207,6 @@
 <header class="hero wrap">
   <div class="hero-grid">
     <div>
-      <span class="eyebrow">Travel agency back-office</span>
       <h1>Run the whole agency<br>from one <em>manifest</em>.</h1>
       <p class="lede">Quotes, invoices, ticket sales, hotel bookings, visas and group trips — one system, one login, in the currency your clients pay in. Built by a software &amp; cybersecurity house, not a spreadsheet with a login screen.</p>
       <div class="hero-ctas">
@@ -273,7 +254,6 @@
 
 <section id="features" class="wrap">
   <div class="section-head">
-    <span class="eyebrow">Everything on the manifest</span>
     <h2>Eight modules. One passenger record.</h2>
     <p>Every quote, ticket and payment is tied back to the same client — so nothing gets re-typed, and nothing falls between two spreadsheets.</p>
   </div>
@@ -295,7 +275,6 @@
 
 <section id="screens" class="wrap">
   <div class="section-head">
-    <span class="eyebrow">The product, not a mockup</span>
     <h2>What your team actually opens every morning.</h2>
     <p>Real screens from a live agency account — client names and figures are demo data, the interface is exactly what ships.</p>
   </div>
@@ -325,31 +304,13 @@
   </div>
 </section>
 
-<section class="wrap">
-  <div class="receipt-title">
-    <span class="eyebrow">The math, itemized</span>
-    <h2>What a year of "the usual way" runs</h2>
-  </div>
-  <div class="receipt-wrap">
-    <div class="receipt">
-      <div class="r-row"><span>Typical agency software — 12 mo</span><span>$996.00</span></div>
-      <div class="r-row"><span>Onboarding / setup fee</span><span>$150.00</span></div>
-      <div class="r-row muted"><span>— then it renews, every year —</span></div>
-      <div class="r-total"><span>Manifest, one payment</span><span>$200.00</span></div>
-      <div class="r-save">You keep $946 in year one — and every year after.</div>
-    </div>
-  </div>
-</section>
-
 <section id="pricing" class="wrap">
   <div class="section-head" style="margin-left:auto;margin-right:auto;text-align:center">
-    <span class="eyebrow" style="justify-content:center">Fare — one way, not round trip</span>
     <h2>One license. No subscription.</h2>
   </div>
   <div class="price-wrap">
     <div class="ticket">
       <div class="ticket-main">
-        <span class="eyebrow">Agency license</span>
         <h3>Full system access</h3>
         <p>Everything on the manifest above — nothing gated behind a higher tier.</p>
         <ul class="ticket-list">
@@ -357,7 +318,7 @@
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>All 8 modules, no add-ons</li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Your logo &amp; currency</li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Role-based staff accounts</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>1 year of updates &amp; support</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Free updates whenever we ship one</li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Your data, hosted &amp; backed up</li>
         </ul>
       </div>
@@ -365,7 +326,7 @@
         <span class="fare-lbl">One-time fare</span>
         <span class="fare"><sup>$</sup>200</span>
         <span class="fare-note">No monthly charge, ever</span>
-        <a class="btn btn-brass btn-sm" href="#contact">Reserve this fare</a>
+        <a class="btn btn-brass btn-sm" href="#contact">Contact us to buy</a>
       </div>
     </div>
   </div>
@@ -374,7 +335,6 @@
 <section id="demo" class="wrap">
   <div class="demo">
     <div>
-      <span class="eyebrow">Boarding pass to the live system</span>
       <h2 style="font-size:30px;margin-top:14px">Log in and click around — nothing to install.</h2>
       <p style="color:var(--ink-soft);font-size:14.5px;margin-top:14px;max-width:44ch">This is a fully isolated demo account: your own sandbox, seeded with sample clients and invoices. Nothing you do there touches a real agency's data.</p>
       <div class="hero-ctas" style="margin-top:22px">
