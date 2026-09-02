@@ -164,20 +164,27 @@
   .demo-card .row span:first-child{color:rgba(255,255,255,.5)}
   .demo-card .row span:last-child{color:var(--brass); font-weight:600}
 
+  /* ---- contact ---- */
+  .contact-card{background:var(--navy-ink); border-radius:20px; padding:56px 48px; text-align:center}
+  .contact-card h2{color:#fff; font-size:32px}
+  .contact-card > p{color:rgba(255,255,255,.62); font-size:15px; margin-top:12px}
+  .contact-links{display:flex; justify-content:center; gap:16px; margin-top:32px; flex-wrap:wrap}
+  .contact-link{display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:16px 24px; text-decoration:none; color:#fff; transition:background .15s, border-color .15s; min-width:260px; text-align:left}
+  .contact-link:hover{background:rgba(255,255,255,.1); border-color:var(--brass)}
+  .contact-link svg{flex:none; color:var(--brass)}
+  .contact-link span{display:flex; flex-direction:column; gap:3px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:rgba(255,255,255,.5)}
+  .contact-link span b{font-family:"IBM Plex Mono",monospace; font-size:15px; font-weight:600; letter-spacing:0; text-transform:none; color:#fff}
+
   /* ---- footer ---- */
-  footer{border-top:1px solid var(--line-soft); padding:48px 0 40px}
-  .foot-grid{display:flex; justify-content:space-between; align-items:flex-start; gap:24px; flex-wrap:wrap}
-  .foot-brand .brand{margin-bottom:8px}
-  .foot-brand p{color:var(--ink-faint); font-size:13px; max-width:34ch; margin:0}
-  .foot-contact{display:flex; gap:28px; flex-wrap:wrap}
-  .foot-contact div span{display:block; font-family:"IBM Plex Mono",monospace; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:5px}
-  .foot-contact div a{font-size:14px; font-weight:600; text-decoration:none; color:var(--ink)}
-  .foot-bottom{margin-top:36px; padding-top:20px; border-top:1px solid var(--line-soft); font-size:12px; color:var(--ink-faint); display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px}
+  footer{padding:28px 0 40px}
+  .foot-bottom{font-size:12px; color:var(--ink-faint); display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px}
 
   @media (max-width: 880px){
     .wrap{padding:0 20px}
     .hero-grid{grid-template-columns:1fr}
     .hero h1{font-size:36px}
+    .contact-card{padding:40px 24px}
+    .contact-link{min-width:0; width:100%}
     .shots-row{grid-template-columns:1fr}
     .ticket{grid-template-columns:1fr}
     .ticket-stub{border-left:none; border-top:2px dashed rgba(255,255,255,.3)}
@@ -210,7 +217,7 @@
       <h1>Run the whole agency<br>from one <em>manifest</em>.</h1>
       <p class="lede">Quotes, invoices, ticket sales, hotel bookings, visas and group trips — one system, one login, in the currency your clients pay in. Built by a software &amp; cybersecurity house, not a spreadsheet with a login screen.</p>
       <div class="hero-ctas">
-        <a class="btn btn-brass" href="#demo">Try the live demo</a>
+        <a class="btn btn-brass" href="https://dashbaordwhitesky-7fw2.onrender.com/demo-login" target="_blank" rel="noopener">Try the live demo</a>
         <a class="btn btn-ghost" href="https://dashbaordwhitesky-7fw2.onrender.com/download" target="_blank" rel="noopener">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>
           Download the app
@@ -335,33 +342,38 @@
 <section id="demo" class="wrap">
   <div class="demo">
     <div>
-      <h2 style="font-size:30px;margin-top:14px">Log in and click around — nothing to install.</h2>
-      <p style="color:var(--ink-soft);font-size:14.5px;margin-top:14px;max-width:44ch">This is a fully isolated demo account: your own sandbox, seeded with sample clients and invoices. Nothing you do there touches a real agency's data.</p>
+      <h2 style="font-size:30px;margin-top:14px">Click through it yourself — nothing to install.</h2>
+      <p style="color:var(--ink-soft);font-size:14.5px;margin-top:14px;max-width:44ch">One click opens a fully isolated sandbox account, already signed in — seeded with sample clients and invoices. Nothing you do there touches a real agency's data.</p>
       <div class="hero-ctas" style="margin-top:22px">
-        <a class="btn btn-primary" href="https://dashbaordwhitesky-7fw2.onrender.com/" target="_blank" rel="noopener">Open the live demo →</a>
+        <a class="btn btn-primary" href="https://dashbaordwhitesky-7fw2.onrender.com/demo-login" target="_blank" rel="noopener">Open the live demo →</a>
       </div>
     </div>
     <div class="demo-card">
-      <div class="row"><span>URL</span><span>dashbaordwhitesky-7fw2.onrender.com</span></div>
-      <div class="row"><span>Username</span><span>test</span></div>
-      <div class="row"><span>Password</span><span>test</span></div>
       <div class="row"><span>Account type</span><span>Isolated sandbox</span></div>
+      <div class="row"><span>Sample data</span><span>Clients &amp; invoices</span></div>
+      <div class="row"><span>Sign-in</span><span>Automatic</span></div>
     </div>
   </div>
 </section>
 
-<footer id="contact" class="wrap">
-  <div class="foot-grid">
-    <div class="foot-brand">
-      <div class="brand"><span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 16l20-8-8 20-3-8-9-4z"/></svg></span>Manifest</div>
-      <p>Travel agency invoicing &amp; operations, built and supported by M&amp;S Cyber Systems.</p>
-    </div>
-    <div class="foot-contact">
-      <div><span>WhatsApp</span><a href="https://wa.me/96171335614" target="_blank" rel="noopener">+961 71 335 614</a></div>
-      <div><span>Email</span><a href="mailto:boudytwitch@gmail.com">boudytwitch@gmail.com</a></div>
-      <div><span>Built by</span><a href="#contact">M&amp;S Cyber Systems</a></div>
+<section id="contact" class="wrap">
+  <div class="contact-card">
+    <h2>Ready to talk?</h2>
+    <p>Questions, a custom quote, or ready to buy — reach M&amp;S Cyber Systems directly.</p>
+    <div class="contact-links">
+      <a class="contact-link" href="https://wa.me/96171335614" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2zm5.79 14.13c-.24.68-1.4 1.3-1.93 1.35-.5.05-1.02.24-3.4-.71-2.87-1.15-4.72-4.06-4.86-4.25-.14-.19-1.16-1.55-1.16-2.95 0-1.41.74-2.09 1-2.38.26-.28.57-.35.76-.35s.38 0 .55.01c.18.01.42-.07.65.5.24.58.81 2 .88 2.14.07.14.12.31.02.5-.09.19-.14.31-.28.48-.14.16-.29.37-.42.49-.14.14-.28.29-.12.57.16.28.71 1.17 1.52 1.9 1.05.94 1.93 1.23 2.21 1.37.28.14.44.12.61-.07.16-.19.7-.81.89-1.09.19-.28.37-.23.63-.14.26.09 1.66.78 1.94.92.28.14.47.21.54.33.07.12.07.68-.17 1.36z"/></svg>
+        <span>WhatsApp<b>+961 71 335 614</b></span>
+      </a>
+      <a class="contact-link" href="mailto:boudytwitch@gmail.com">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>
+        <span>Email<b>boudytwitch@gmail.com</b></span>
+      </a>
     </div>
   </div>
+</section>
+
+<footer class="wrap">
   <div class="foot-bottom">
     <span>© 2026 M&amp;S Cyber Systems — Cybersecurity · Software · Systems</span>
     <span>Pricing shown in USD. Custom &amp; multi-agency terms on request.</span>

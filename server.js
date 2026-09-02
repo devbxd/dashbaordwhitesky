@@ -532,6 +532,18 @@ async function patron(req, res, next) {
   next();
 }
 
+// One-click entry point for the sales page's "Try the live demo" button — signs the visitor
+// straight into the isolated 'test' sandbox account with no form to fill in. Safe to leave
+// public: 'test' is an isolated demo role with its own sandboxed data, same as if they'd
+// typed the well-known test/test credentials themselves.
+app.get('/demo-login', async (req, res) => {
+  try {
+    const u = await queryOne("SELECT * FROM users WHERE username='test'");
+    if (!u || u.active === false) return res.redirect('/');
+    req.session.user = { id: u.id, username: u.username, role: u.role, display_name: u.display_name };
+    res.redirect('/');
+  } catch (e) { res.redirect('/'); }
+});
 app.post('/api/login', async (req, res) => {
   try {
     const u = await queryOne('SELECT * FROM users WHERE username=?', [req.body.username]);
