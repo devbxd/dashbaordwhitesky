@@ -66,9 +66,6 @@
   .brand{display:flex; align-items:center; gap:10px; font-family:"Fraunces",serif; font-weight:600; font-size:20px; letter-spacing:-.01em}
   .brand .mark{width:30px; height:30px; border-radius:8px; background:var(--navy); display:flex; align-items:center; justify-content:center; flex:none}
   .brand .mark svg{width:16px; height:16px}
-  .nav-links{display:flex; gap:32px; font-size:14px; color:var(--ink-soft)}
-  .nav-links a{text-decoration:none; transition:color .15s}
-  .nav-links a:hover{color:var(--ink)}
   .btn{display:inline-flex; align-items:center; gap:8px; padding:11px 20px; border-radius:9px; font-size:14px; font-weight:600; text-decoration:none; border:1px solid transparent; cursor:pointer; transition:transform .15s, box-shadow .15s, background .15s}
   .btn:focus-visible{outline:2px solid var(--brass); outline-offset:2px}
   .btn-primary{background:var(--navy); color:#fff}
@@ -124,11 +121,15 @@
   .section-head{max-width:640px; margin-bottom:44px}
   .section-head h2{font-size:34px; font-weight:600; margin-top:14px}
   .section-head p{color:var(--ink-soft); font-size:15.5px; margin-top:12px}
-  .manifest{display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:14px; overflow:hidden}
-  .m-item{background:var(--surface); padding:26px 24px; display:flex; flex-direction:column; gap:12px}
-  .m-code{font-family:"IBM Plex Mono",monospace; font-size:11px; font-weight:600; letter-spacing:.06em; color:var(--brass-deep); background:var(--brass-tint); align-self:flex-start; padding:4px 9px; border-radius:5px}
-  .m-item h3{font-size:16.5px; font-weight:600}
-  .m-item p{margin:0; font-size:13.5px; color:var(--ink-soft); line-height:1.55}
+  .ledger{border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--surface); box-shadow:var(--shadow)}
+  .ledger-head-row{display:grid; grid-template-columns:48px 70px 1fr; gap:18px; padding:12px 24px; background:var(--surface-2); font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); border-bottom:1px solid var(--line)}
+  .ledger-head-row .hide-sm{display:block}
+  .ledger-row{display:grid; grid-template-columns:48px 70px 1fr; gap:18px; padding:20px 24px; border-bottom:1px dashed var(--line); align-items:baseline}
+  .ledger-row:last-child{border-bottom:none}
+  .ledger-idx{font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink-faint)}
+  .ledger-code{font-family:"IBM Plex Mono",monospace; font-size:12.5px; font-weight:700; letter-spacing:.04em; color:var(--brass-deep)}
+  .ledger-body h3{font-size:16px; font-weight:600; margin-bottom:4px}
+  .ledger-body p{margin:0; font-size:13.5px; color:var(--ink-soft); line-height:1.55; max-width:56ch}
 
   /* ---- screenshots ---- */
   .shots{display:flex; flex-direction:column; gap:20px}
@@ -139,18 +140,19 @@
   .shot figcaption{padding:12px 16px; font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-faint); border-top:1px solid var(--line-soft)}
   figure{margin:0}
 
-  /* ---- why one-time ---- */
-  .compare{background:var(--navy-ink); color:#fff; border-radius:20px; padding:52px; display:grid; grid-template-columns:1fr 1px 1fr; gap:0; align-items:center}
-  .compare .col{padding:0 40px}
-  .compare .col:first-child{padding-left:0}
-  .compare .col:last-child{padding-right:0}
-  .compare-div{background:rgba(255,255,255,.14); height:100%; min-height:160px}
-  .compare .tag{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:rgba(255,255,255,.5); margin-bottom:10px; display:block}
-  .compare .big{font-family:"Fraunces",serif; font-size:38px; font-weight:600; margin-bottom:8px}
-  .compare .big small{font-size:16px; font-weight:400; color:rgba(255,255,255,.55)}
-  .compare .sub{font-size:13.5px; color:rgba(255,255,255,.6); line-height:1.6}
-  .compare .win .big{color:var(--brass); }
-  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .compare .win .big{color:var(--brass)} }
+  /* ---- why one-time, shown as an actual receipt ---- */
+  .receipt-wrap{display:flex; justify-content:center}
+  .receipt{width:100%; max-width:420px; background:var(--surface); border:1px solid var(--line); border-radius:6px 6px 0 0; padding:36px 32px 30px; box-shadow:var(--shadow-lg); position:relative}
+  .receipt::after{content:""; display:block; position:absolute; left:0; right:0; bottom:-13px; height:14px; background:linear-gradient(-45deg, var(--paper) 8px, transparent 0), linear-gradient(45deg, var(--paper) 8px, transparent 0); background-size:16px 16px; background-position:bottom left; background-repeat:repeat-x}
+  .receipt-title{text-align:center; margin-bottom:22px}
+  .receipt-title .eyebrow{justify-content:center; margin-bottom:8px}
+  .receipt-title h2{font-size:22px}
+  .r-row{display:flex; justify-content:space-between; gap:12px; font-family:"IBM Plex Mono",monospace; font-size:13px; padding:8px 0; color:var(--ink-soft); border-bottom:1px dashed var(--line)}
+  .r-row.muted{color:var(--ink-faint); font-style:italic; border-bottom:none; justify-content:center; font-size:11.5px; padding-top:4px}
+  .r-total{display:flex; justify-content:space-between; align-items:baseline; margin-top:14px; padding-top:14px; border-top:2px solid var(--ink); font-family:"IBM Plex Mono",monospace}
+  .r-total span:first-child{font-size:14px; font-weight:700}
+  .r-total span:last-child{font-size:22px; font-weight:700; color:var(--brass-deep)}
+  .r-save{text-align:center; margin-top:16px; font-size:13px; color:var(--success); font-weight:600}
 
   /* ---- pricing ---- */
   .price-wrap{display:flex; justify-content:center}
@@ -193,20 +195,17 @@
     .wrap{padding:0 20px}
     .hero-grid{grid-template-columns:1fr}
     .hero h1{font-size:36px}
-    .manifest{grid-template-columns:1fr 1fr}
     .shots-row{grid-template-columns:1fr}
-    .compare{grid-template-columns:1fr; gap:28px; padding:32px}
-    .compare-div{display:none}
-    .compare .col{padding:0}
+    .receipt{padding:32px 24px}
     .ticket{grid-template-columns:1fr}
     .ticket-stub{border-left:none; border-top:2px dashed rgba(255,255,255,.3)}
     .ticket-stub::before,.ticket-stub::after{left:50%; top:-11px; transform:translateX(-50%)}
     .ticket-stub::after{bottom:auto; top:auto; top:unset}
     .demo{grid-template-columns:1fr}
-    .nav-links{display:none}
   }
   @media (max-width: 560px){
-    .manifest{grid-template-columns:1fr}
+    .ledger-head-row .hide-sm,.ledger-row .ledger-idx{display:none}
+    .ledger-head-row,.ledger-row{grid-template-columns:60px 1fr}
     .pass{grid-template-columns:1fr}
     .pass-stub{flex-direction:row; border-left:none; border-top:1px dashed rgba(255,255,255,.25)}
     .pass-stub .amt,.pass-stub .lbl{writing-mode:horizontal-tb}
@@ -219,12 +218,6 @@
 <nav class="nav">
   <div class="nav-inner">
     <div class="brand"><span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 16l20-8-8 20-3-8-9-4z"/></svg></span>Manifest</div>
-    <div class="nav-links">
-      <a href="#features">Features</a>
-      <a href="#screens">Product</a>
-      <a href="#pricing">Pricing</a>
-      <a href="#demo">Live demo</a>
-    </div>
     <a class="btn btn-primary btn-sm" href="#contact">Contact us</a>
   </div>
 </nav>
@@ -284,16 +277,19 @@
     <h2>Eight modules. One passenger record.</h2>
     <p>Every quote, ticket and payment is tied back to the same client — so nothing gets re-typed, and nothing falls between two spreadsheets.</p>
   </div>
-  <div class="manifest">
-    <div class="m-item"><span class="m-code">FAC</span><h3>Invoices &amp; quotes</h3><p>PNR, destination, passenger and airline on every line — quotes convert to invoices in one click, no re-entry.</p></div>
-    <div class="m-item"><span class="m-code">CN</span><h3>Credit notes &amp; payments</h3><p>Partial payments, balances due, and refunds tracked against the original invoice automatically.</p></div>
-    <div class="m-item"><span class="m-code">TKT</span><h3>Ticket sales</h3><p>Net vs. selling price per ticket, so margin is visible the moment a sale is logged.</p></div>
-    <div class="m-item"><span class="m-code">HTL</span><h3>Hotel bookings</h3><p>Confirmation numbers, check-in/out dates and room type, billed individually or by group.</p></div>
-    <div class="m-item"><span class="m-code">VISA</span><h3>Visa applications</h3><p>Status tracking from submission to appointment, with the client's documents attached.</p></div>
-    <div class="m-item"><span class="m-code">GRP</span><h3>Group trips</h3><p>One trip, many travelers — who's paid, who owes, and the room list, in one place.</p></div>
-    <div class="m-item"><span class="m-code">DOC</span><h3>Passport vault</h3><p>Passport numbers and expiry dates per client, so a renewal never sneaks up on you.</p></div>
-    <div class="m-item"><span class="m-code">RPT</span><h3>Reports &amp; roles</h3><p>Revenue by month, top clients, and a dashboard scoped to what each teammate should actually see.</p></div>
-    <div class="m-item"><span class="m-code">SET</span><h3>Your branding</h3><p>Your logo, letterhead and currency on every document — KWD, USD, EUR, LBP, AED, SAR and more.</p></div>
+  <div class="ledger">
+    <div class="ledger-head-row">
+      <span>No.</span><span>Code</span><span>Module</span><span class="hide-sm">What it does</span>
+    </div>
+    <div class="ledger-row"><span class="ledger-idx">01</span><span class="ledger-code">FAC</span><div class="ledger-body"><h3>Invoices &amp; quotes</h3><p>PNR, destination, passenger and airline on every line — quotes convert to invoices in one click, no re-entry.</p></div></div>
+    <div class="ledger-row"><span class="ledger-idx">02</span><span class="ledger-code">CN</span><div class="ledger-body"><h3>Credit notes &amp; payments</h3><p>Partial payments, balances due, and refunds tracked against the original invoice automatically.</p></div></div>
+    <div class="ledger-row"><span class="ledger-idx">03</span><span class="ledger-code">TKT</span><div class="ledger-body"><h3>Ticket sales</h3><p>Net vs. selling price per ticket, so margin is visible the moment a sale is logged.</p></div></div>
+    <div class="ledger-row"><span class="ledger-idx">04</span><span class="ledger-code">HTL</span><div class="ledger-body"><h3>Hotel bookings</h3><p>Confirmation numbers, check-in/out dates and room type, billed individually or by group.</p></div></div>
+    <div class="ledger-row"><span class="ledger-idx">05</span><span class="ledger-code">VISA</span><div class="ledger-body"><h3>Visa applications</h3><p>Status tracking from submission to appointment, with the client's documents attached.</p></div></div>
+    <div class="ledger-row"><span class="ledger-idx">06</span><span class="ledger-code">GRP</span><div class="ledger-body"><h3>Group trips</h3><p>One trip, many travelers — who's paid, who owes, and the room list, in one place.</p></div></div>
+    <div class="ledger-row"><span class="ledger-idx">07</span><span class="ledger-code">DOC</span><div class="ledger-body"><h3>Passport vault</h3><p>Passport numbers and expiry dates per client, so a renewal never sneaks up on you.</p></div></div>
+    <div class="ledger-row"><span class="ledger-idx">08</span><span class="ledger-code">RPT</span><div class="ledger-body"><h3>Reports &amp; roles</h3><p>Revenue by month, top clients, and a dashboard scoped to what each teammate should actually see.</p></div></div>
+    <div class="ledger-row"><span class="ledger-idx">09</span><span class="ledger-code">SET</span><div class="ledger-body"><h3>Your branding</h3><p>Your logo, letterhead and currency on every document — KWD, USD, EUR, LBP, AED, SAR and more.</p></div></div>
   </div>
 </section>
 
@@ -330,17 +326,17 @@
 </section>
 
 <section class="wrap">
-  <div class="compare">
-    <div class="col">
-      <span class="tag">The usual way</span>
-      <div class="big">$83<small>/mo × 12, forever</small></div>
-      <p class="sub">Typical travel back-office SaaS pricing — and the meter keeps running whether you send one invoice a month or a thousand.</p>
-    </div>
-    <div class="compare-div"></div>
-    <div class="col win">
-      <span class="tag">Manifest</span>
-      <div class="big">One payment<small>, then it's yours</small></div>
-      <p class="sub">No seat count, no monthly invoice from us. You pay once for the license — every invoice you send after that is pure margin.</p>
+  <div class="receipt-title">
+    <span class="eyebrow">The math, itemized</span>
+    <h2>What a year of "the usual way" runs</h2>
+  </div>
+  <div class="receipt-wrap">
+    <div class="receipt">
+      <div class="r-row"><span>Typical agency software — 12 mo</span><span>$996.00</span></div>
+      <div class="r-row"><span>Onboarding / setup fee</span><span>$150.00</span></div>
+      <div class="r-row muted"><span>— then it renews, every year —</span></div>
+      <div class="r-total"><span>Manifest, one payment</span><span>$200.00</span></div>
+      <div class="r-save">You keep $946 in year one — and every year after.</div>
     </div>
   </div>
 </section>

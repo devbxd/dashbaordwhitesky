@@ -84,6 +84,40 @@ const NUM_PREFIX = {
   client: { inv: 'INV-', tkt: 'TKT-', qte: 'QTE-', cn: 'CN-', htl: 'HTL-', visa: 'VISA-', grp: 'GRP-' },
 };
 
+// Two people creating an invoice/quote in the same second both see the same "next number"
+// preview (from the GET next-num endpoints below) and could otherwise both submit it — the
+// second insert just fails on the UNIQUE constraint. This computes the number again right
+// before the real insert and retries a few times on a collision instead of surfacing that
+// as an error, so a race never loses someone's typed invoice.
+const NUM_RESOURCE = {
+  invoices: { table: 'invoices', key: 'inv', default: 'FAC-' },
+  quotes: { table: 'quotes', key: 'qte', default: 'QTE-' },
+};
+async function computeNextNum(resourceKey, user) {
+  const cfg = NUM_RESOURCE[resourceKey];
+  if (isIsolated(user.role)) {
+    const prefix = (NUM_PREFIX[user.role] || NUM_PREFIX.demo)[cfg.key];
+    const last = await queryOne(`SELECT num FROM ${cfg.table} WHERE owner_id=? ORDER BY id DESC LIMIT 1`, [user.id]);
+    if (!last) return prefix + '001';
+    const m = last.num.match(/(\d+)$/);
+    return prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
+  }
+  const last = await queryOne(`SELECT num FROM ${cfg.table} ORDER BY id DESC LIMIT 1`);
+  if (!last) return cfg.default + '001';
+  const m = last.num.match(/(\d+)$/);
+  return cfg.default + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
+}
+async function withUniqueNumRetry(resourceKey, user, tryInsert, maxAttempts = 5) {
+  let num = await computeNextNum(resourceKey, user);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try { return { num, row: await tryInsert(num) }; }
+    catch (e) {
+      if (e.code === '23505' && attempt < maxAttempts) { num = await computeNextNum(resourceKey, user); continue; }
+      throw e;
+    }
+  }
+}
+
 async function query(sql, params = []) {
   const { rows } = await pool.query(toParams(sql), params);
   return rows;
@@ -672,12 +706,12 @@ app.get('/api/invoices/:id', auth, async (req, res) => {
 });
 app.post('/api/invoices', auth, async (req, res) => {
   try {
-    const { num, client_id, client_name, client_address, client_phone, client_fax, status, date, due_date, due_days, tax, deposit, notes, currency, rows } = req.body;
+    const { client_id, client_name, client_address, client_phone, client_fax, status, date, due_date, due_days, tax, deposit, notes, currency, rows } = req.body;
     const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
     const taxA = parseFloat(tax) || 0, depA = parseFloat(deposit) || 0;
-    const r = await queryOne(
+    const { num, row: r } = await withUniqueNumRetry('invoices', req.session.user, (num) => queryOne(
       'INSERT INTO invoices (num,client_id,client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name,verify_token) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'pending', cleanDate(date), cleanDate(due_date), due_days || 7, sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name, crypto.randomBytes(12).toString('hex')]);
+      [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'pending', cleanDate(date), cleanDate(due_date), due_days || 7, sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name, crypto.randomBytes(12).toString('hex')]));
     for (const row of (rows || [])) {
       await run('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,"airlineRef",travel_date,price) VALUES (?,?,?,?,?,?,?,?)',
         [r.id, row.pnr || '', row.destination || '', row.passenger || '', row.airline || '', row.airlineRef || '', row.travel_date || '', parseFloat(row.price) || 0]);
@@ -775,12 +809,12 @@ app.get('/api/quotes/:id', auth, async (req, res) => {
 });
 app.post('/api/quotes', auth, async (req, res) => {
   try {
-    const { num, client_id, client_name, client_address, client_phone, client_fax, status, date, valid_until, tax, deposit, notes, currency, rows } = req.body;
+    const { client_id, client_name, client_address, client_phone, client_fax, status, date, valid_until, tax, deposit, notes, currency, rows } = req.body;
     const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
     const taxA = parseFloat(tax) || 0, depA = parseFloat(deposit) || 0;
-    const r = await queryOne(
+    const { num, row: r } = await withUniqueNumRetry('quotes', req.session.user, (num) => queryOne(
       'INSERT INTO quotes (num,client_id,client_name,client_address,client_phone,client_fax,status,date,valid_until,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'draft', cleanDate(date), cleanDate(valid_until), sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name]);
+      [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'draft', cleanDate(date), cleanDate(valid_until), sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name]));
     for (const row of (rows || [])) {
       await run('INSERT INTO quote_rows (quote_id,pnr,destination,passenger,airline,"airlineRef",travel_date,price) VALUES (?,?,?,?,?,?,?,?)',
         [r.id, row.pnr || '', row.destination || '', row.passenger || '', row.airline || '', row.airlineRef || '', row.travel_date || '', parseFloat(row.price) || 0]);
@@ -841,22 +875,9 @@ app.post('/api/quotes/:id/convert', auth, async (req, res) => {
     if (qt.converted_invoice_id) return res.status(400).json({ error: 'Already converted' });
     const rows = await query('SELECT * FROM quote_rows WHERE quote_id=?', [qt.id]);
 
-    const isIso = isIsolated(req.session.user.role);
-    let num;
-    if (isIso) {
-      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).inv;
-      const last = await queryOne('SELECT num FROM invoices WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
-      const m = last ? last.num.match(/(\d+)$/) : null;
-      num = prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
-    } else {
-      const last = await queryOne('SELECT num FROM invoices ORDER BY id DESC LIMIT 1');
-      const m = last ? last.num.match(/(\d+)$/) : null;
-      num = 'FAC-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
-    }
-
-    const r = await queryOne(
+    const { num, row: r } = await withUniqueNumRetry('invoices', req.session.user, (num) => queryOne(
       'INSERT INTO invoices (num,client_id,client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name,verify_token) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, qt.client_id || null, qt.client_name, qt.client_address || '', qt.client_phone || '', qt.client_fax || '', 'pending', cleanDate(new Date().toISOString()), null, 7, qt.subtotal, qt.tax, qt.deposit, qt.total, qt.currency || 'KWD', qt.notes || '', req.session.user.id, req.session.user.display_name, crypto.randomBytes(12).toString('hex')]);
+      [num, qt.client_id || null, qt.client_name, qt.client_address || '', qt.client_phone || '', qt.client_fax || '', 'pending', cleanDate(new Date().toISOString()), null, 7, qt.subtotal, qt.tax, qt.deposit, qt.total, qt.currency || 'KWD', qt.notes || '', req.session.user.id, req.session.user.display_name, crypto.randomBytes(12).toString('hex')]));
     for (const row of rows) {
       await run('INSERT INTO invoice_rows (invoice_id,pnr,destination,passenger,airline,"airlineRef",travel_date,price) VALUES (?,?,?,?,?,?,?,?)',
         [r.id, row.pnr || '', row.destination || '', row.passenger || '', row.airline || '', row.airlineRef || '', row.travel_date || '', row.price || 0]);
@@ -1492,35 +1513,109 @@ app.get('/api/reports/summary', auth, async (req, res) => {
       let payConds = ['invoices.owner_id=?']; const payP = [req.session.user.id];
       if (from) { payConds.push('payments.date>=?'); payP.push(from); }
       if (to) { payConds.push('payments.date<=?'); payP.push(to); }
-      pays = await query(`SELECT payments.* FROM payments JOIN invoices ON invoices.id=payments.invoice_id WHERE ${payConds.join(' AND ')}`, payP);
+      pays = await query(`SELECT payments.*, invoices.currency AS inv_currency FROM payments JOIN invoices ON invoices.id=payments.invoice_id WHERE ${payConds.join(' AND ')}`, payP);
     } else {
       let payConds = []; const payP = [];
       if (from) { payConds.push('payments.date>=?'); payP.push(from); }
       if (to) { payConds.push('payments.date<=?'); payP.push(to); }
       if (isPatron) payConds.push(ISOLATED_OWNER_COND);
       const payW = payConds.length ? 'WHERE ' + payConds.join(' AND ') : '';
-      pays = await query(`SELECT payments.* FROM payments LEFT JOIN invoices ON invoices.id=payments.invoice_id ${payW}`, payP);
+      pays = await query(`SELECT payments.*, invoices.currency AS inv_currency FROM payments LEFT JOIN invoices ON invoices.id=payments.invoice_id ${payW}`, payP);
     }
 
+    // Invoices aren't all in the same currency (a KWD invoice and a USD invoice can't be
+    // added together into one meaningful total), so everything is grouped by currency first.
+    // The top-level fields below (paid/pending/... ) reflect only the currency with the most
+    // invoices — `byCurrency` carries the full breakdown, and `otherCurrencies` flags when
+    // there's more than one, so the dashboard can say so instead of silently mixing sums.
+    const currencyOf = (row) => row.currency || 'KWD';
+    const currencyCounts = {};
+    for (const i of inv) currencyCounts[currencyOf(i)] = (currencyCounts[currencyOf(i)] || 0) + 1;
+    const primaryCurrency = Object.keys(currencyCounts).sort((a, b) => currencyCounts[b] - currencyCounts[a])[0] || 'KWD';
+
+    const byCurrency = {};
+    for (const cur of Object.keys(currencyCounts)) {
+      const curInv = inv.filter(i => currencyOf(i) === cur);
+      const status = { paid: 0, pending: 0, overdue: 0, draft: 0 };
+      for (const i of curInv) status[i.status] = (status[i.status] || 0) + (parseFloat(i.total) || 0);
+      const curPays = pays.filter(p => (p.inv_currency || 'KWD') === cur);
+      byCurrency[cur] = {
+        ...status,
+        total: curInv.reduce((a, i) => a + (parseFloat(i.total) || 0), 0),
+        totalPayments: curPays.reduce((a, p) => a + (parseFloat(p.amount) || 0), 0),
+        invoiceCount: curInv.length,
+      };
+    }
+    const primaryInv = inv.filter(i => currencyOf(i) === primaryCurrency);
+    const primaryPays = pays.filter(p => (p.inv_currency || 'KWD') === primaryCurrency);
+
     const byMonth = {};
-    for (const i of inv) { const m = (i.date || '').slice(0, 7); if (m) { byMonth[m] = (byMonth[m] || 0) + i.total; } }
-    const byStatus = { paid: 0, pending: 0, overdue: 0, draft: 0 };
-    for (const i of inv) byStatus[i.status] = (byStatus[i.status] || 0) + (parseFloat(i.total)||0);
+    for (const i of primaryInv) { const m = (i.date || '').slice(0, 7); if (m) { byMonth[m] = (byMonth[m] || 0) + i.total; } }
+    const byStatus = byCurrency[primaryCurrency] || { paid: 0, pending: 0, overdue: 0, draft: 0 };
     const byClient = {};
-    for (const i of inv) byClient[i.client_name] = (byClient[i.client_name] || 0) + i.total;
+    for (const i of primaryInv) byClient[i.client_name] = (byClient[i.client_name] || 0) + i.total;
     const countResult = isIsolatedUser
       ? await queryOne('SELECT COUNT(*) as c FROM clients WHERE owner_id=?', [req.session.user.id])
       : isPatron
         ? await queryOne(`SELECT COUNT(*) as c FROM clients WHERE ${ISOLATED_OWNER_COND}`)
         : await queryOne('SELECT COUNT(*) as c FROM clients');
     res.json({
+      currency: primaryCurrency,
+      byCurrency,
+      otherCurrencies: Object.keys(currencyCounts).filter(c => c !== primaryCurrency),
       paid: byStatus.paid, pending: byStatus.pending, overdue: byStatus.overdue, draft: byStatus.draft,
-      totalPayments: pays.reduce((a, p) => a + (parseFloat(p.amount)||0), 0),
-      invoiceCount: inv.length,
+      totalPayments: primaryPays.reduce((a, p) => a + (parseFloat(p.amount)||0), 0),
+      invoiceCount: primaryInv.length,
       clientCount: parseInt(countResult.c),
       byMonth, byClient,
       topClients: Object.entries(byClient).sort((a, b) => b[1] - a[1]).slice(0, 5)
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// One combined "what needs attention soon" feed for the dashboard — passport renewals,
+// visa appointments and invoices coming due, so nobody has to check three separate pages
+// to see what's about to become a problem.
+app.get('/api/upcoming', auth, async (req, res) => {
+  try {
+    const user = req.session.user;
+    function scopeCond() {
+      if (isIsolated(user.role) || user.role === 'employe') return { sql: 'owner_id=?', params: [user.id] };
+      if (user.role === 'patron') return { sql: ISOLATED_OWNER_COND, params: [] };
+      return { sql: '1=1', params: [] };
+    }
+    const horizon = cleanDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString());
+    const items = [];
+
+    {
+      const { sql, params } = scopeCond();
+      const rows = await query(
+        `SELECT client_name, passport_expiry FROM client_passports WHERE passport_expiry IS NOT NULL AND passport_expiry<>'' AND passport_expiry<=? AND (${sql}) ORDER BY passport_expiry ASC LIMIT 15`,
+        [horizon, ...params]);
+      for (const r of rows) items.push({ type: 'passport', icon: 'ti-file-certificate', title: r.client_name, sub: 'Passport expiring', date: r.passport_expiry });
+    }
+    {
+      const { sql, params } = scopeCond();
+      const rows = await query(
+        `SELECT passenger, country, appointment_date FROM visas WHERE appointment_date IS NOT NULL AND appointment_date<>'' AND appointment_date<=? AND (${sql}) ORDER BY appointment_date ASC LIMIT 15`,
+        [horizon, ...params]);
+      for (const r of rows) items.push({ type: 'visa', icon: 'ti-id', title: r.passenger || 'Visa application', sub: `Appointment${r.country ? ' — ' + r.country : ''}`, date: r.appointment_date });
+    }
+    {
+      const { sql, params } = scopeCond();
+      const rows = await query(
+        `SELECT num, client_name, due_date FROM invoices WHERE due_date IS NOT NULL AND due_date<>'' AND due_date<=? AND status IN ('pending','partial') AND (${sql}) ORDER BY due_date ASC LIMIT 15`,
+        [horizon, ...params]);
+      for (const r of rows) items.push({ type: 'invoice', icon: 'ti-file-invoice', title: `${r.num} — ${r.client_name}`, sub: 'Payment due', date: r.due_date });
+    }
+
+    const today = cleanDate(new Date().toISOString());
+    for (const it of items) {
+      it.daysUntil = Math.round((new Date(it.date) - new Date(today)) / 86400000);
+      it.urgency = it.daysUntil <= 3 ? 'urgent' : it.daysUntil <= 10 ? 'soon' : 'normal';
+    }
+    items.sort((a, b) => new Date(a.date) - new Date(b.date));
+    res.json(items.slice(0, 12));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

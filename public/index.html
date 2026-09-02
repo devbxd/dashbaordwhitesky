@@ -4,9 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WhiteSky Travel — Invoicing</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230B3A63'/%3E%3Cpath d='M14 33l36-16-14 36-5-15-15-5z' fill='%23fff'/%3E%3Ccircle cx='47' cy='17' r='4' fill='%23A9782E'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
 <link rel="stylesheet" href="/css/app.css">
 </head>
@@ -281,6 +282,21 @@
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeModal('modal-import-pdf')">Cancel</button>
       <button class="btn-save" id="btn-save-pdf" style="display:none" onclick="savePdfInvoice()"><i class="ti ti-check"></i> Save Invoice</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONFIRM DIALOG (replaces browser confirm()) -->
+<div class="modal-bg hidden" id="modal-confirm">
+  <div class="modal-box" style="max-width:400px">
+    <div class="modal-body" style="padding-top:1.6rem;text-align:center">
+      <div class="confirm-icon" id="confirm-icon"><i class="ti ti-alert-triangle"></i></div>
+      <div class="confirm-title" id="confirm-title">Are you sure?</div>
+      <div class="confirm-msg" id="confirm-msg"></div>
+    </div>
+    <div class="modal-actions" style="justify-content:center">
+      <button class="btn-secondary" id="confirm-cancel">Cancel</button>
+      <button class="btn-danger" id="confirm-ok" style="background:var(--danger);color:#fff;border-color:var(--danger)">Confirm</button>
     </div>
   </div>
 </div>
