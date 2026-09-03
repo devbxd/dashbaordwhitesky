@@ -290,7 +290,7 @@ function playWelcome(name,cyber){
   });
 }
 document.getElementById('btn-logout').addEventListener('click',async()=>{await api('POST','/api/logout');currentUser=null;document.getElementById('app-screen').classList.add('hidden');document.getElementById('login-screen').style.display='flex';document.getElementById('login-pass').value='';});
-function showApp(){document.getElementById('login-screen').style.display='none';document.getElementById('app-screen').classList.remove('hidden');document.getElementById('user-avatar').textContent=initials(currentUser.display_name);document.getElementById('user-name-display').textContent=currentUser.display_name;const roleLabels={patron:'Administrator',employe:'Staff',demo:'Demo',cyber:'CEO',client:'Owner'};document.getElementById('user-role-display').textContent=roleLabels[currentUser.role]||'Staff';applyBranding();}
+function showApp(){document.getElementById('login-screen').style.display='none';document.getElementById('app-screen').classList.remove('hidden');document.getElementById('user-avatar').textContent=initials(currentUser.display_name);document.getElementById('user-name-display').textContent=currentUser.display_name;const roleLabels={patron:'Owner',employe:'Staff',demo:'User',cyber:'Owner',client:'Owner'};document.getElementById('user-role-display').textContent=roleLabels[currentUser.role]||'Staff';applyBranding();}
 function applyBranding(){
   const cyber=isCyber();
   const client=isClient();
@@ -1292,7 +1292,7 @@ async function deleteUser(id){if(!await confirmDialog('Delete this user?'))retur
 /* ADMIN (patron only) */
 async function pageAdmin(mc){
   const[users,invites]=await Promise.all([api('GET','/api/users'),api('GET','/api/invites')]);
-  const roleLabel={patron:'Administrator',employe:'Staff',demo:'Demo',cyber:'CEO (Cyber)',client:'Client (self-registered)'};
+  const roleLabel={patron:'Owner',employe:'Staff',demo:'User (Demo)',cyber:'Owner (Cyber)',client:'User (Client)'};
   mc.innerHTML=`
 <div class="page-header"><div><div class="page-title">Admin</div><div class="page-sub">Sales page link, invite codes and account access — visible to the owner only</div></div></div>
 <div class="card" style="max-width:680px"><div class="card-header"><span class="card-title"><i class="ti ti-download" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Sales Page Link</span></div>
