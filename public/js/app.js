@@ -1261,7 +1261,31 @@ function uploadStamp(input){const file=input.files[0];if(!file)return;const read
 async function removeStamp(){await api('POST','/api/settings',{company_stamp:''});settings.company_stamp='';toast('Stamp removed');showPage('settings');}
 
 /* USERS */
-function openUserModal(id){const isEdit=!!id;document.getElementById('modal-user-title').textContent=isEdit?'Edit User':'New User';document.getElementById('edit-user-id').value=id||'';document.getElementById('btn-save-user').textContent=isEdit?'Update':'Create';document.getElementById('u-pass-hint').style.display=isEdit?'':'none';document.getElementById('u-display').value='';document.getElementById('u-username').value='';document.getElementById('u-password').value='';document.getElementById('u-role').value='employe';document.getElementById('u-username').disabled=!!isEdit;openModal('modal-user');}
+async function openUserModal(id){
+  const isEdit=!!id;
+  document.getElementById('modal-user-title').textContent=isEdit?'Edit User':'New User';
+  document.getElementById('edit-user-id').value=id||'';
+  document.getElementById('btn-save-user').textContent=isEdit?'Update':'Create';
+  document.getElementById('u-pass-hint').style.display=isEdit?'':'none';
+  document.getElementById('u-password').value='';
+  document.getElementById('u-username').disabled=!!isEdit;
+  if(isEdit){
+    // Pre-fill with this user's actual current values — this used to always reset to a
+    // blank name and the "Staff" role regardless of who you clicked Edit on, so saving
+    // without retyping everything silently overwrote both (that's how an isolated 'cyber'
+    // account lost its role to 'patron' and its display name to blank).
+    const allUsers=await api('GET','/api/users');
+    const u=allUsers.find(x=>x.id===id);
+    document.getElementById('u-display').value=u?.display_name||'';
+    document.getElementById('u-username').value=u?.username||'';
+    document.getElementById('u-role').value=u?.role||'employe';
+  }else{
+    document.getElementById('u-display').value='';
+    document.getElementById('u-username').value='';
+    document.getElementById('u-role').value='employe';
+  }
+  openModal('modal-user');
+}
 document.getElementById('btn-save-user').addEventListener('click',async()=>{const id=document.getElementById('edit-user-id').value;const body={display_name:document.getElementById('u-display').value.trim(),username:document.getElementById('u-username').value.trim(),password:document.getElementById('u-password').value,role:document.getElementById('u-role').value};if(!id&&(!body.username||!body.password)){toast('All fields are required','error');return;}const r=id?await api('PUT',`/api/users/${id}`,body):await api('POST','/api/users',body);if(r&&r.error){toast(r.error,'error');return;}closeModal('modal-user');toast('✅ User '+(id?'updated':'created'),'success');showPage('settings');});
 async function deleteUser(id){if(!await confirmDialog('Delete this user?'))return;await api('DELETE',`/api/users/${id}`);toast('User deleted');showPage('settings');}
 
