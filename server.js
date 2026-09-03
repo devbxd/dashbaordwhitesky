@@ -855,6 +855,343 @@ app.get('/api/invoices/:id/pdf', auth, async (req, res) => {
     doc.end();
   } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
 });
+
+// Shared pieces for the rest of the pdfkit documents below — same letterhead shape
+// (logo/company left, title+meta right, navy rule) and same table drawing, so quotes,
+// credit notes, statements and the profit report don't each re-implement it.
+function pdfLetterhead(doc, { title, titleColor, metaRows, s }) {
+  const NAVY = '#0a3258', FAINT = '#999999';
+  const pageW = doc.page.width, marginX = 40;
+  let y = 36;
+  const logoBuf = pdfImageBuffer(s.company_logo);
+  let leftTextX = marginX;
+  if (logoBuf) { try { doc.image(logoBuf, marginX, y, { fit: [64, 64] }); leftTextX = marginX + 76; } catch (e) {} }
+  doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(13).text(s.company_name || '', leftTextX, y + (logoBuf ? 22 : 0), { width: 260 });
+  doc.fillColor(titleColor || NAVY).font('Helvetica-Bold').fontSize(28).text(title, marginX, y, { width: pageW - marginX * 2, align: 'right' });
+  const rightColX = pageW - marginX - 220;
+  let my = y + 40;
+  for (const [lbl, val] of metaRows) {
+    doc.fontSize(9).font('Helvetica-Bold').fillColor(FAINT).text(lbl, rightColX, my, { width: 90, align: 'right' });
+    doc.font('Helvetica-Bold').fillColor('#1a1a2e').text(val, rightColX + 95, my, { width: 125, align: 'right' });
+    my += 13;
+  }
+  y = Math.max(y + 80, my + 8);
+  doc.moveTo(marginX, y).lineTo(pageW - marginX, y).lineWidth(3).strokeColor(NAVY).stroke();
+  return y + 18;
+}
+// Generic table: header row + data rows, paginating (with the header re-drawn) if the
+// table runs past the bottom margin instead of silently overflowing off the page.
+function pdfTable(doc, { x, y, colsRight, cols, dataRows, zebra }) {
+  const pageH = doc.page.height;
+  function drawHeader(yy) {
+    let cx = x;
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#666666');
+    for (const c of cols) { doc.text(c.label, cx, yy, { width: c.w, align: c.align || 'left' }); cx += c.w; }
+    yy += 13;
+    doc.moveTo(x, yy).lineTo(colsRight, yy).lineWidth(1).strokeColor('#e5eaf2').stroke();
+    return yy + 7;
+  }
+  y = drawHeader(y);
+  dataRows.forEach((vals, idx) => {
+    if (y > pageH - 70) { doc.addPage(); y = drawHeader(40); }
+    if (zebra && idx % 2 === 0) doc.rect(x, y - 3, colsRight - x, 15).fill('#f2f5fa');
+    let cx = x;
+    vals.forEach((v, i) => {
+      doc.font(cols[i].bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(8.5).fillColor(cols[i].color || '#333333').text(String(v === undefined || v === null || v === '' ? '—' : v), cx, y, { width: cols[i].w, align: cols[i].align || 'left' });
+      cx += cols[i].w;
+    });
+    y += 15;
+  });
+  return y;
+}
+function money(n, cur) { return `${cur || 'KWD'} ${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+
+function renderQuotePdf(doc, { qt, rows, s }) {
+  const NAVY = '#0a3258', SOFT = '#666666', FAINT = '#999999';
+  const pageW = doc.page.width, marginX = 40;
+  const metaRows = [['QUOTE #:', qt.num], ['DATE:', fmtDatePdf(qt.date)]];
+  if (qt.valid_until) metaRows.push(['VALID UNTIL:', fmtDatePdf(qt.valid_until)]);
+  let y = pdfLetterhead(doc, { title: 'QUOTE', metaRows, s });
+
+  const colW = (pageW - marginX * 2 - 30) / 2;
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('FROM', marginX, y);
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('BILL TO', marginX + colW + 30, y);
+  y += 13;
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(NAVY).text(s.company_name || '', marginX, y, { width: colW });
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(NAVY).text(qt.client_name || '', marginX + colW + 30, y, { width: colW });
+  const fromLines = [s.company_address, [s.company_phone_p && `P: ${s.company_phone_p}`, s.company_phone_m && `M: ${s.company_phone_m}`].filter(Boolean).join('  '), s.company_email].filter(Boolean).join('\n');
+  const billLines = [qt.client_address, qt.client_phone && `Phone: ${qt.client_phone}`, qt.client_fax && `Fax: ${qt.client_fax}`].filter(Boolean).join('\n');
+  doc.font('Helvetica').fontSize(9).fillColor(SOFT).text(fromLines, marginX, y + 15, { width: colW, lineGap: 3 });
+  doc.font('Helvetica').fontSize(9).fillColor(SOFT).text(billLines, marginX + colW + 30, y + 15, { width: colW, lineGap: 3 });
+  y = Math.max(doc.y, y + 60) + 18;
+
+  const cols = [
+    { label: 'PNR #', w: 65, bold: true, color: NAVY },
+    { label: 'DESTINATION', w: 95 },
+    { label: 'PASSENGER', w: 140 },
+    { label: 'AIRLINE', w: 70 },
+    { label: 'DATE', w: 75 },
+    { label: 'PRICE', w: 0, align: 'right', bold: true },
+  ];
+  cols[cols.length - 1].w = (pageW - marginX * 2) - cols.slice(0, -1).reduce((a, c) => a + c.w, 0);
+  const dataRows = rows.map(r => [r.pnr, r.destination, r.passenger, r.airline, fmtDatePdf(r.travel_date), money(r.price, qt.currency)]);
+  y = pdfTable(doc, { x: marginX, y, colsRight: pageW - marginX, cols, dataRows });
+
+  y += 14;
+  const boxW = 250, boxX = pageW - marginX - boxW;
+  const totalRows = [
+    ['Quote Subtotal', money(qt.subtotal, qt.currency)],
+    ['Tax', qt.tax ? money(qt.tax, qt.currency) : `${qt.currency || 'KWD'} -`],
+    ['Deposit', qt.deposit ? money(qt.deposit, qt.currency) : `${qt.currency || 'KWD'} -`],
+  ];
+  for (const [lbl, val] of totalRows) {
+    doc.font('Helvetica').fontSize(9.5).fillColor(FAINT).text(lbl, boxX, y, { width: boxW * 0.55 });
+    doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#1a1a2e').text(val, boxX + boxW * 0.55, y, { width: boxW * 0.45, align: 'right' });
+    y += 15;
+  }
+  doc.rect(boxX, y, boxW, 22).fill(NAVY);
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#ffffff').text('TOTAL', boxX + 10, y + 6, { width: boxW * 0.55 });
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#ffffff').text(money(qt.total, qt.currency), boxX, y + 6, { width: boxW - 10, align: 'right' });
+  y += 40;
+  if (qt.notes) doc.font('Helvetica').fontSize(8.5).fillColor(FAINT).text(qt.notes, marginX, y, { width: pageW - marginX * 2, lineGap: 2 });
+}
+
+function renderCreditNotePdf(doc, { cn, s }) {
+  const NAVY = '#0a3258', GOLD = '#b8860b', FAINT = '#999999';
+  const pageW = doc.page.width, marginX = 40;
+  const metaRows = [['CREDIT NOTE #:', cn.num], ['DATE:', fmtDatePdf(cn.date)]];
+  if (cn.invoice_num) metaRows.push(['ORIGINAL INVOICE:', cn.invoice_num]);
+  let y = pdfLetterhead(doc, { title: 'CREDIT NOTE', titleColor: GOLD, metaRows, s });
+
+  const colW = (pageW - marginX * 2 - 30) / 2;
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('FROM', marginX, y);
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('ISSUED TO', marginX + colW + 30, y);
+  y += 13;
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(NAVY).text(s.company_name || '', marginX, y, { width: colW });
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(NAVY).text(cn.client_name || '', marginX + colW + 30, y, { width: colW });
+  const fromLines = [s.company_address, [s.company_phone_p && `P: ${s.company_phone_p}`, s.company_phone_m && `M: ${s.company_phone_m}`].filter(Boolean).join('  '), s.company_email].filter(Boolean).join('\n');
+  doc.font('Helvetica').fontSize(9).fillColor('#666666').text(fromLines, marginX, y + 15, { width: colW, lineGap: 3 });
+  y = Math.max(doc.y, y + 60) + 18;
+
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('REASON', marginX, y);
+  y += 13;
+  doc.font('Helvetica').fontSize(10).fillColor('#333333').text(cn.reason || '—', marginX, y, { width: pageW - marginX * 2, lineGap: 3 });
+  y = doc.y + 24;
+
+  const boxW = 250, boxX = pageW - marginX - boxW;
+  doc.rect(boxX, y, boxW, 26).fill(GOLD);
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#ffffff').text('CREDIT AMOUNT', boxX + 10, y + 8, { width: boxW * 0.55 });
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#ffffff').text(money(cn.amount, cn.currency), boxX, y + 8, { width: boxW - 10, align: 'right' });
+}
+
+// Company / individual / all-clients statements share the same shape: a headline, a total
+// due callout, a table of rows, and a totals line — only the columns and rows differ.
+function renderStatementPdf(doc, { headline, s, periodLabel, cols, dataRows, totalAmount, totalDue, currency }) {
+  const NAVY = '#0a3258', FAINT = '#999999';
+  const pageW = doc.page.width, marginX = 40;
+  let y = pdfLetterhead(doc, { title: 'STATEMENT', metaRows: [['DATE:', new Date().toLocaleDateString('en-GB')], ['PERIOD:', periodLabel]], s });
+
+  doc.font('Helvetica-Bold').fontSize(13).fillColor(NAVY).text(headline, marginX, y, { width: pageW - marginX * 2 - 190 });
+  const boxW = 180, boxX = pageW - marginX - boxW;
+  doc.font('Helvetica').fontSize(8).fillColor(FAINT).text('TOTAL OUTSTANDING', boxX, y, { width: boxW, align: 'right' });
+  doc.font('Helvetica-Bold').fontSize(15).fillColor(NAVY).text(money(totalDue, currency), boxX, y + 12, { width: boxW, align: 'right' });
+  y += 42;
+
+  y = pdfTable(doc, { x: marginX, y, colsRight: pageW - marginX, cols, dataRows, zebra: true });
+
+  y += 8;
+  doc.moveTo(marginX, y).lineTo(pageW - marginX, y).lineWidth(1).strokeColor('#dddddd').stroke();
+  y += 8;
+  doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#333333').text('Total', marginX, y);
+  doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#333333').text(money(totalAmount, currency), pageW - marginX - 250, y, { width: 130, align: 'right' });
+  doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#c0392b').text(money(totalDue, currency), pageW - marginX - 110, y, { width: 110, align: 'right' });
+}
+
+function renderProfitReportPdf(doc, { title, s, periodLabel, cols, dataRows, totalNet, totalSell, totalProfit, currency }) {
+  const NAVY = '#0a3258';
+  const pageW = doc.page.width, marginX = 40;
+  let y = pdfLetterhead(doc, { title: title.toUpperCase(), metaRows: [['DATE:', new Date().toLocaleDateString('en-GB')], ['PERIOD:', periodLabel]], s });
+  y = pdfTable(doc, { x: marginX, y, colsRight: pageW - marginX, cols, dataRows, zebra: true });
+  y += 8;
+  const boxW = 250, boxX = pageW - marginX - boxW;
+  doc.rect(boxX, y, boxW, 22).fill(NAVY);
+  doc.font('Helvetica-Bold').fontSize(10).fillColor('#ffffff').text('TOTAL', boxX + 10, y + 6, { width: boxW * 0.4 });
+  doc.font('Helvetica-Bold').fontSize(10).fillColor('#ffffff').text(`Net ${money(totalNet, currency)}   Sold ${money(totalSell, currency)}   Profit ${money(totalProfit, currency)}`, boxX, y + 6, { width: boxW - 10, align: 'right' });
+}
+
+app.get('/api/quotes/:id/pdf', auth, async (req, res) => {
+  try {
+    const qt = await queryOne('SELECT * FROM quotes WHERE id=?', [req.params.id]);
+    if (!qt) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'employe' && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(qt.owner_id)) return res.status(403).json({ error: 'Access denied' });
+    if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    const rows = await query('SELECT * FROM quote_rows WHERE quote_id=?', [qt.id]);
+    const s = await getScopedSettings(req.session.user);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${qt.num}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    doc.pipe(res);
+    renderQuotePdf(doc, { qt, rows, s });
+    doc.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/credit-notes/:id/pdf', auth, async (req, res) => {
+  try {
+    const cn = await queryOne('SELECT * FROM credit_notes WHERE id=?', [req.params.id]);
+    if (!cn) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(cn.owner_id)) return res.status(403).json({ error: 'Access denied' });
+    if (isIsolated(req.session.user.role) && cn.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    const s = await getScopedSettings(req.session.user);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${cn.num}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    doc.pipe(res);
+    renderCreditNotePdf(doc, { cn, s });
+    doc.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/statements/company/pdf', auth, async (req, res) => {
+  try {
+    const { clientId, from, to } = req.query;
+    if (!clientId) return res.status(400).json({ error: 'clientId is required' });
+    const client = await queryOne('SELECT * FROM clients WHERE id=?', [clientId]);
+    if (!client) return res.status(404).json({ error: 'Introuvable' });
+    let q = 'SELECT * FROM invoices WHERE (client_id=? OR client_name=?)'; const p = [clientId, client.name];
+    if (req.session.user.role === 'employe' || isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') q += PATRON_EXCLUDE_ISOLATED;
+    if (from) { q += ' AND date>=?'; p.push(from); }
+    if (to) { q += ' AND date<=?'; p.push(to); }
+    q += ' ORDER BY date ASC';
+    const invoices = await query(q, p);
+    const s = await getScopedSettings(req.session.user);
+    const currency = invoices[0]?.currency || 'KWD';
+    const totalAmount = invoices.reduce((a, i) => a + (parseFloat(i.total) || 0), 0);
+    const totalDue = invoices.filter(i => i.status !== 'paid' && i.status !== 'refunded').reduce((a, i) => a + (parseFloat(i.total) || 0), 0);
+    const cols = [
+      { label: 'DATE', w: 60 }, { label: 'INVOICE #', w: 70, bold: true, color: '#0a3258' },
+      { label: 'DESCRIPTION', w: 110 }, { label: 'TOTAL', w: 75, align: 'right' },
+      { label: 'BALANCE DUE', w: 75, align: 'right', bold: true }, { label: 'DUE DATE', w: 60, align: 'center' },
+      { label: 'STATUS', w: 0 },
+    ];
+    cols[cols.length - 1].w = (595.28 - 80) - cols.slice(0, -1).reduce((a, c) => a + c.w, 0);
+    const dataRows = invoices.map(i => {
+      const paid = i.status === 'paid' || i.status === 'refunded';
+      return [fmtDatePdf(i.date), i.num, i.notes ? i.notes.split(' ').slice(0, 3).join(' ').toUpperCase() : 'TICKET', money(i.total, i.currency), paid ? '' : money(i.total, i.currency), fmtDatePdf(i.due_date), i.status.toUpperCase()];
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Statement-${client.name}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    doc.pipe(res);
+    renderStatementPdf(doc, { headline: client.name, s, periodLabel: `${from ? fmtDatePdf(from) : 'start'} – ${to ? fmtDatePdf(to) : 'today'}`, cols, dataRows, totalAmount, totalDue, currency });
+    doc.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/statements/person/pdf', auth, async (req, res) => {
+  try {
+    const { name, from, to } = req.query;
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    let invQ = "SELECT * FROM invoices WHERE client_name ILIKE '%' || ? || '%'"; const invP = [name];
+    let tktQ = "SELECT * FROM ticket_sales WHERE passenger ILIKE '%' || ? || '%'"; const tktP = [name];
+    if (req.session.user.role === 'employe' || isIsolated(req.session.user.role)) { invQ += ' AND owner_id=?'; invP.push(req.session.user.id); tktQ += ' AND owner_id=?'; tktP.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') { invQ += PATRON_EXCLUDE_ISOLATED; tktQ += PATRON_EXCLUDE_ISOLATED; }
+    if (from) { invQ += ' AND date>=?'; invP.push(from); tktQ += ' AND date>=?'; tktP.push(from); }
+    if (to) { invQ += ' AND date<=?'; invP.push(to); tktQ += ' AND date<=?'; tktP.push(to); }
+    const [invoices, tickets] = await Promise.all([query(invQ, invP), query(tktQ, tktP)]);
+    const s = await getScopedSettings(req.session.user);
+    const allRows = [
+      ...invoices.map(i => ({ date: i.date, num: i.num, total: i.total, due: (i.status === 'paid' || i.status === 'refunded') ? 0 : i.total, due_date: i.due_date, status: i.status, currency: i.currency })),
+      ...tickets.map(t => ({ date: t.date, num: t.num, total: t.selling_price, due: (t.status === 'paid' || t.status === 'refunded') ? 0 : t.selling_price, due_date: null, status: t.status, currency: t.currency })),
+    ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const currency = allRows[0]?.currency || 'KWD';
+    const totalAmount = allRows.reduce((a, r) => a + (parseFloat(r.total) || 0), 0);
+    const totalDue = allRows.reduce((a, r) => a + (parseFloat(r.due) || 0), 0);
+    const cols = [
+      { label: 'DATE', w: 65 }, { label: '#', w: 75, bold: true, color: '#0a3258' },
+      { label: 'TOTAL', w: 90, align: 'right' }, { label: 'BALANCE DUE', w: 90, align: 'right', bold: true },
+      { label: 'DUE DATE', w: 80, align: 'center' }, { label: 'STATUS', w: 0 },
+    ];
+    cols[cols.length - 1].w = (595.28 - 80) - cols.slice(0, -1).reduce((a, c) => a + c.w, 0);
+    const dataRows = allRows.map(r => [fmtDatePdf(r.date), r.num, money(r.total, r.currency), r.due > 0 ? money(r.due, r.currency) : '', r.due_date ? fmtDatePdf(r.due_date) : '—', r.status.toUpperCase()]);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Statement-${name}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    doc.pipe(res);
+    renderStatementPdf(doc, { headline: name, s, periodLabel: `${from ? fmtDatePdf(from) : 'start'} – ${to ? fmtDatePdf(to) : 'today'}`, cols, dataRows, totalAmount, totalDue, currency });
+    doc.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/statements/all/pdf', auth, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let q = 'SELECT * FROM invoices WHERE 1=1'; const p = [];
+    if (req.session.user.role === 'employe' || isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') q += PATRON_EXCLUDE_ISOLATED;
+    if (from) { q += ' AND date>=?'; p.push(from); }
+    if (to) { q += ' AND date<=?'; p.push(to); }
+    q += ' ORDER BY date ASC, client_name ASC';
+    const invoices = await query(q, p);
+    const s = await getScopedSettings(req.session.user);
+    const currency = invoices[0]?.currency || 'KWD';
+    const totalAmount = invoices.reduce((a, i) => a + (parseFloat(i.total) || 0), 0);
+    const totalDue = invoices.filter(i => i.status !== 'paid' && i.status !== 'refunded').reduce((a, i) => a + (parseFloat(i.total) || 0), 0);
+    const cols = [
+      { label: 'DATE', w: 55 }, { label: 'INVOICE #', w: 65, bold: true, color: '#0a3258' },
+      { label: 'CLIENT', w: 130 }, { label: 'TOTAL', w: 70, align: 'right' },
+      { label: 'BALANCE DUE', w: 75, align: 'right', bold: true }, { label: 'DUE DATE', w: 65, align: 'center' },
+      { label: 'STATUS', w: 0 },
+    ];
+    cols[cols.length - 1].w = (595.28 - 80) - cols.slice(0, -1).reduce((a, c) => a + c.w, 0);
+    const dataRows = invoices.map(i => {
+      const paid = i.status === 'paid' || i.status === 'refunded';
+      return [fmtDatePdf(i.date), i.num, i.client_name, money(i.total, i.currency), paid ? '' : money(i.total, i.currency), fmtDatePdf(i.due_date), i.status.toUpperCase()];
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="All-Statements-${from || 'start'}-to-${to || 'today'}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    doc.pipe(res);
+    renderStatementPdf(doc, { headline: 'All Clients', s, periodLabel: `${from ? fmtDatePdf(from) : 'start'} – ${to ? fmtDatePdf(to) : 'today'}`, cols, dataRows, totalAmount, totalDue, currency });
+    doc.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/reports/profit/pdf', auth, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const cyber = req.session.user.role === 'cyber';
+    let q = 'SELECT * FROM ticket_sales WHERE 1=1'; const p = [];
+    if (req.session.user.role === 'employe' || isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') q += PATRON_EXCLUDE_ISOLATED;
+    if (from) { q += ' AND date>=?'; p.push(from); }
+    if (to) { q += ' AND date<=?'; p.push(to); }
+    q += ' ORDER BY date ASC';
+    const tickets = await query(q, p);
+    const s = await getScopedSettings(req.session.user);
+    const currency = tickets[0]?.currency || 'KWD';
+    const totalNet = tickets.reduce((a, t) => a + (parseFloat(t.net_price) || 0), 0);
+    const totalSell = tickets.reduce((a, t) => a + (parseFloat(t.selling_price) || 0), 0);
+    const totalProfit = totalSell - totalNet;
+    const cols = [
+      { label: 'DATE', w: 55 }, { label: '#', w: 60, bold: true, color: '#0a3258' },
+      { label: cyber ? 'CLIENT' : 'PASSENGER', w: 110 }, { label: cyber ? 'CATEGORY' : 'AIRLINE', w: 70 },
+      { label: 'NET', w: 70, align: 'right' }, { label: 'SOLD', w: 70, align: 'right' },
+      { label: cyber ? 'MARGIN' : 'PROFIT', w: 0, align: 'right', bold: true, color: '#1a7a3a' },
+    ];
+    cols[cols.length - 1].w = (595.28 - 80) - cols.slice(0, -1).reduce((a, c) => a + c.w, 0);
+    const dataRows = tickets.map(t => [fmtDatePdf(t.date), t.num, t.passenger, t.airline, money(t.net_price, t.currency), money(t.selling_price, t.currency), money((t.selling_price || 0) - (t.net_price || 0), t.currency)]);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${cyber ? 'Margin' : 'Profit'}-Report.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    doc.pipe(res);
+    renderProfitReportPdf(doc, { title: cyber ? 'Margin Report' : 'Profit Report', s, periodLabel: `${from ? fmtDatePdf(from) : 'start'} – ${to ? fmtDatePdf(to) : 'today'}`, cols, dataRows, totalNet, totalSell, totalProfit, currency });
+    doc.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/invoices', auth, async (req, res) => {
   try {
     const { client_id, client_name, client_address, client_phone, client_fax, status, date, due_date, due_days, tax, deposit, notes, currency, rows } = req.body;
