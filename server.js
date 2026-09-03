@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const QRCode = require('qrcode');
 const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
+const sharp = require('sharp');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
@@ -725,8 +726,27 @@ app.get('/api/invoices/:id', auth, async (req, res) => {
 function pdfImageBuffer(dataUri) {
   if (!dataUri || typeof dataUri !== 'string') return null;
   const m = dataUri.match(/^data:image\/(png|jpe?g);base64,([a-zA-Z0-9+/=]+)$/i);
-  if (!m) return null; // pdfkit only embeds PNG/JPEG — an SVG logo just falls back to text
+  if (!m) return null;
   try { return Buffer.from(m[2], 'base64'); } catch { return null; }
+}
+// pdfkit only embeds PNG/JPEG — an SVG logo (the default M&S mark, or anyone's own vector
+// logo) silently produced no image at all. This rasterizes any SVG data URI to PNG before
+// it reaches pdfImageBuffer, so a vector logo/signature/stamp shows up like any other.
+async function toRasterDataUri(dataUri) {
+  if (!dataUri || typeof dataUri !== 'string') return dataUri;
+  const m = dataUri.match(/^data:image\/svg\+xml;base64,([a-zA-Z0-9+/=]+)$/i);
+  if (!m) return dataUri;
+  try {
+    const svgBuf = Buffer.from(m[1], 'base64');
+    const pngBuf = await sharp(svgBuf, { density: 300 }).png().toBuffer();
+    return `data:image/png;base64,${pngBuf.toString('base64')}`;
+  } catch (e) { return dataUri; }
+}
+async function rasterizeBrandAssets(s) {
+  const [company_logo, company_signature, company_stamp] = await Promise.all([
+    toRasterDataUri(s.company_logo), toRasterDataUri(s.company_signature), toRasterDataUri(s.company_stamp),
+  ]);
+  return { ...s, company_logo, company_signature, company_stamp };
 }
 function fmtDatePdf(d) {
   if (!d) return '—';
@@ -844,6 +864,7 @@ app.get('/api/invoices/:id/pdf', auth, async (req, res) => {
     if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     const rows = await query('SELECT * FROM invoice_rows WHERE invoice_id=?', [inv.id]);
     const s = await getScopedSettings(req.session.user);
+    const rasterized = await rasterizeBrandAssets(s); Object.assign(s, rasterized);
     const verifyUrl = `${req.protocol}://${req.get('host')}/verify/${inv.verify_token}`;
     const qrBuffer = await QRCode.toBuffer(verifyUrl, { margin: 1, width: 200, color: { dark: '#0a3258' } });
 
@@ -1028,6 +1049,7 @@ app.get('/api/quotes/:id/pdf', auth, async (req, res) => {
     if (isIsolated(req.session.user.role) && qt.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     const rows = await query('SELECT * FROM quote_rows WHERE quote_id=?', [qt.id]);
     const s = await getScopedSettings(req.session.user);
+    const rasterized = await rasterizeBrandAssets(s); Object.assign(s, rasterized);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${qt.num}.pdf"`);
     const doc = new PDFDocument({ size: 'A4', margin: 0 });
@@ -1044,6 +1066,7 @@ app.get('/api/credit-notes/:id/pdf', auth, async (req, res) => {
     if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(cn.owner_id)) return res.status(403).json({ error: 'Access denied' });
     if (isIsolated(req.session.user.role) && cn.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
     const s = await getScopedSettings(req.session.user);
+    const rasterized = await rasterizeBrandAssets(s); Object.assign(s, rasterized);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${cn.num}.pdf"`);
     const doc = new PDFDocument({ size: 'A4', margin: 0 });
@@ -1067,6 +1090,7 @@ app.get('/api/statements/company/pdf', auth, async (req, res) => {
     q += ' ORDER BY date ASC';
     const invoices = await query(q, p);
     const s = await getScopedSettings(req.session.user);
+    const rasterized = await rasterizeBrandAssets(s); Object.assign(s, rasterized);
     const currency = invoices[0]?.currency || 'KWD';
     const totalAmount = invoices.reduce((a, i) => a + (parseFloat(i.total) || 0), 0);
     const totalDue = invoices.filter(i => i.status !== 'paid' && i.status !== 'refunded').reduce((a, i) => a + (parseFloat(i.total) || 0), 0);
@@ -1102,6 +1126,7 @@ app.get('/api/statements/person/pdf', auth, async (req, res) => {
     if (to) { invQ += ' AND date<=?'; invP.push(to); tktQ += ' AND date<=?'; tktP.push(to); }
     const [invoices, tickets] = await Promise.all([query(invQ, invP), query(tktQ, tktP)]);
     const s = await getScopedSettings(req.session.user);
+    const rasterized = await rasterizeBrandAssets(s); Object.assign(s, rasterized);
     const allRows = [
       ...invoices.map(i => ({ date: i.date, num: i.num, total: i.total, due: (i.status === 'paid' || i.status === 'refunded') ? 0 : i.total, due_date: i.due_date, status: i.status, currency: i.currency })),
       ...tickets.map(t => ({ date: t.date, num: t.num, total: t.selling_price, due: (t.status === 'paid' || t.status === 'refunded') ? 0 : t.selling_price, due_date: null, status: t.status, currency: t.currency })),
@@ -1136,6 +1161,7 @@ app.get('/api/statements/all/pdf', auth, async (req, res) => {
     q += ' ORDER BY date ASC, client_name ASC';
     const invoices = await query(q, p);
     const s = await getScopedSettings(req.session.user);
+    const rasterized = await rasterizeBrandAssets(s); Object.assign(s, rasterized);
     const currency = invoices[0]?.currency || 'KWD';
     const totalAmount = invoices.reduce((a, i) => a + (parseFloat(i.total) || 0), 0);
     const totalDue = invoices.filter(i => i.status !== 'paid' && i.status !== 'refunded').reduce((a, i) => a + (parseFloat(i.total) || 0), 0);
@@ -1171,6 +1197,7 @@ app.get('/api/reports/profit/pdf', auth, async (req, res) => {
     q += ' ORDER BY date ASC';
     const tickets = await query(q, p);
     const s = await getScopedSettings(req.session.user);
+    const rasterized = await rasterizeBrandAssets(s); Object.assign(s, rasterized);
     const currency = tickets[0]?.currency || 'KWD';
     const totalNet = tickets.reduce((a, t) => a + (parseFloat(t.net_price) || 0), 0);
     const totalSell = tickets.reduce((a, t) => a + (parseFloat(t.selling_price) || 0), 0);
