@@ -8,6 +8,7 @@ const { google } = require('googleapis');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
 const nodemailer = require('nodemailer');
+const PDFDocument = require('pdfkit');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
@@ -715,6 +716,144 @@ app.get('/api/invoices/:id', auth, async (req, res) => {
     const qrDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 160, color: { dark: '#0a3258' } });
     res.json({ ...inv, rows, verify_url: verifyUrl, qr_data_url: qrDataUrl });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// A real PDF, drawn with pdfkit rather than rasterized from HTML — the browser/Electron
+// print dialog and a client-side HTML-to-canvas step (tried first) both turned out unreliable
+// for producing a downloadable file; this draws text and lines directly onto the page, so
+// there's no rendering engine in between that can clip or mis-scale the content.
+function pdfImageBuffer(dataUri) {
+  if (!dataUri || typeof dataUri !== 'string') return null;
+  const m = dataUri.match(/^data:image\/(png|jpe?g);base64,([a-zA-Z0-9+/=]+)$/i);
+  if (!m) return null; // pdfkit only embeds PNG/JPEG — an SVG logo just falls back to text
+  try { return Buffer.from(m[2], 'base64'); } catch { return null; }
+}
+function fmtDatePdf(d) {
+  if (!d) return '—';
+  const s = String(d).split('T')[0];
+  const [y, m, day] = s.split('-');
+  return y && m && day ? `${day}/${m}/${y}` : s;
+}
+// Pure drawing function — no req/res, no DB — so it can be exercised directly with fake data
+// instead of only ever being checked by clicking the button in a live app.
+function renderInvoicePdf(doc, { inv, rows, s, qrBuffer }) {
+  const fmt = (n) => `${inv.currency || 'KWD'} ${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const NAVY = '#0a3258', SOFT = '#666666', FAINT = '#999999', LINE = '#e5eaf2';
+  const pageW = doc.page.width, marginX = 40;
+  const rightColX = pageW - marginX - 220;
+
+  // Header: logo/company name left, INVOICE title + meta right
+  let y = 36;
+  const logoBuf = pdfImageBuffer(s.company_logo);
+  let leftTextX = marginX;
+  if (logoBuf) { try { doc.image(logoBuf, marginX, y, { fit: [64, 64] }); leftTextX = marginX + 76; } catch (e) {} }
+  doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(13).text(s.company_name || '', leftTextX, y + (logoBuf ? 22 : 0), { width: 260 });
+
+  doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(32).text('INVOICE', marginX, y, { width: pageW - marginX * 2, align: 'right' });
+  doc.fontSize(9).font('Helvetica-Bold').fillColor(FAINT).text('INVOICE #:', rightColX, y + 40, { width: 90, align: 'right', continued: false });
+  doc.font('Helvetica-Bold').fillColor('#1a1a2e').text(inv.num, rightColX + 95, y + 40, { width: 125, align: 'right' });
+  doc.font('Helvetica-Bold').fillColor(FAINT).text('INVOICE DATE:', rightColX, y + 53, { width: 90, align: 'right' });
+  doc.font('Helvetica-Bold').fillColor('#1a1a2e').text(fmtDatePdf(inv.date), rightColX + 95, y + 53, { width: 125, align: 'right' });
+
+  y += 86;
+  doc.moveTo(marginX, y).lineTo(pageW - marginX, y).lineWidth(3).strokeColor(NAVY).stroke();
+  y += 18;
+
+  // FROM / BILL TO
+  const colW = (pageW - marginX * 2 - 30) / 2;
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('FROM', marginX, y);
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('BILL TO', marginX + colW + 30, y);
+  y += 13;
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(NAVY).text(s.company_name || '', marginX, y, { width: colW });
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(NAVY).text(inv.client_name || '', marginX + colW + 30, y, { width: colW });
+  const fromLines = [s.company_address, [s.company_phone_p && `P: ${s.company_phone_p}`, s.company_phone_m && `M: ${s.company_phone_m}`].filter(Boolean).join('  '), s.company_email].filter(Boolean).join('\n');
+  const billLines = [inv.client_address, inv.client_phone && `Phone: ${inv.client_phone}`, inv.client_fax && `Fax: ${inv.client_fax}`].filter(Boolean).join('\n');
+  doc.font('Helvetica').fontSize(9).fillColor(SOFT).text(fromLines, marginX, y + 15, { width: colW, lineGap: 3 });
+  doc.font('Helvetica').fontSize(9).fillColor(SOFT).text(billLines, marginX + colW + 30, y + 15, { width: colW, lineGap: 3 });
+
+  y = Math.max(doc.y, y + 60) + 18;
+
+  // Table
+  const cols = [
+    { key: 'pnr', label: 'PNR #', w: 65 },
+    { key: 'destination', label: 'DESTINATION', w: 95 },
+    { key: 'passenger', label: 'PASSENGER', w: 140 },
+    { key: 'airline', label: 'AIRLINE', w: 70 },
+    { key: 'travel_date', label: 'DATE', w: 75, fmt: fmtDatePdf },
+    { key: 'price', label: 'PRICE', w: 0, align: 'right', fmt: (v) => fmt(v) },
+  ];
+  cols[cols.length - 1].w = (pageW - marginX * 2) - cols.slice(0, -1).reduce((a, c) => a + c.w, 0);
+  let x = marginX;
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(SOFT);
+  for (const c of cols) { doc.text(c.label, x, y, { width: c.w, align: c.align || 'left' }); x += c.w; }
+  y += 14;
+  doc.moveTo(marginX, y).lineTo(pageW - marginX, y).lineWidth(1).strokeColor(LINE).stroke();
+  y += 8;
+
+  for (const r of rows) {
+    const rowH = 20;
+    x = marginX;
+    doc.font('Helvetica').fontSize(9.5).fillColor('#333333');
+    for (const c of cols) {
+      const raw = c.key === 'pnr' ? r.pnr : c.key === 'destination' ? r.destination : c.key === 'passenger' ? r.passenger : c.key === 'airline' ? r.airline : c.key === 'travel_date' ? r.travel_date : r.price;
+      const val = c.fmt ? c.fmt(raw) : (raw || '—');
+      doc.font(c.key === 'pnr' || c.key === 'price' ? 'Helvetica-Bold' : 'Helvetica').fillColor(c.key === 'pnr' ? NAVY : '#333333').text(String(val), x, y, { width: c.w, align: c.align || 'left' });
+      x += c.w;
+    }
+    y += rowH;
+    doc.moveTo(marginX, y - 4).lineTo(pageW - marginX, y - 4).lineWidth(0.5).strokeColor('#f0f3f8').stroke();
+  }
+
+  y += 14;
+  // Totals box, right-aligned
+  const boxW = 250, boxX = pageW - marginX - boxW;
+  const totalRows = [
+    ['Invoice Subtotal', fmt(inv.subtotal)],
+    ['Tax Rate', inv.tax ? fmt(inv.tax) : `${inv.currency || 'KWD'} -`],
+    ['Sales Tax', inv.tax ? fmt(inv.tax) : `${inv.currency || 'KWD'} -`],
+    ['Deposit Received', inv.deposit ? fmt(inv.deposit) : `${inv.currency || 'KWD'} -`],
+  ];
+  for (const [lbl, val] of totalRows) {
+    doc.font('Helvetica').fontSize(9.5).fillColor(FAINT).text(lbl, boxX, y, { width: boxW * 0.55 });
+    doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#1a1a2e').text(val, boxX + boxW * 0.55, y, { width: boxW * 0.45, align: 'right' });
+    y += 15;
+  }
+  doc.rect(boxX, y, boxW, 22).fill(NAVY);
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#ffffff').text('TOTAL', boxX + 10, y + 6, { width: boxW * 0.55 });
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#ffffff').text(fmt(inv.total), boxX, y + 6, { width: boxW - 10, align: 'right' });
+  y += 46;
+
+  // Signature / Stamp / QR
+  const sigBuf = pdfImageBuffer(s.company_signature);
+  const stampBuf = pdfImageBuffer(s.company_stamp);
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('SIGNATURE', marginX, y);
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('STAMP', marginX + 150, y);
+  if (sigBuf) { try { doc.image(sigBuf, marginX, y + 14, { fit: [110, 55] }); } catch (e) {} }
+  if (stampBuf) { try { doc.image(stampBuf, marginX + 150, y + 14, { fit: [80, 80] }); } catch (e) {} }
+  if (qrBuffer) { try { doc.image(qrBuffer, marginX + 260, y + 10, { fit: [60, 60] }); doc.font('Helvetica-Bold').fontSize(6.5).fillColor(FAINT).text('SCAN TO VERIFY', marginX + 250, y + 73, { width: 80, align: 'center' }); } catch (e) {} }
+
+  const footerLines = [s.invoice_footer, `Total due in ${inv.due_days || 7} days.`].filter(Boolean).join('\n');
+  doc.font('Helvetica').fontSize(8.5).fillColor(FAINT).text(footerLines, marginX, y + 95, { width: pageW - marginX * 2, align: 'right', lineGap: 2 });
+}
+app.get('/api/invoices/:id/pdf', auth, async (req, res) => {
+  try {
+    const inv = await queryOne('SELECT * FROM invoices WHERE id=?', [req.params.id]);
+    if (!inv) return res.status(404).json({ error: 'Introuvable' });
+    if (req.session.user.role === 'employe' && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
+    if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    const rows = await query('SELECT * FROM invoice_rows WHERE invoice_id=?', [inv.id]);
+    const s = await getScopedSettings(req.session.user);
+    const verifyUrl = `${req.protocol}://${req.get('host')}/verify/${inv.verify_token}`;
+    const qrBuffer = await QRCode.toBuffer(verifyUrl, { margin: 1, width: 200, color: { dark: '#0a3258' } });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${inv.num}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    doc.pipe(res);
+    renderInvoicePdf(doc, { inv, rows, s, qrBuffer });
+    doc.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
 });
 app.post('/api/invoices', auth, async (req, res) => {
   try {
