@@ -81,9 +81,9 @@ function settingsPrefix(user) {
   return '';
 }
 const NUM_PREFIX = {
-  cyber: { inv: 'MSC-', tkt: 'MSC-SVC-', qte: 'MSC-QTE-', cn: 'MSC-CN-', htl: 'MSC-HTL-', visa: 'MSC-VISA-', grp: 'MSC-GRP-' },
-  demo: { inv: 'DEMO-', tkt: 'DEMO-TKT-', qte: 'DEMO-QTE-', cn: 'DEMO-CN-', htl: 'DEMO-HTL-', visa: 'DEMO-VISA-', grp: 'DEMO-GRP-' },
-  client: { inv: 'INV-', tkt: 'TKT-', qte: 'QTE-', cn: 'CN-', htl: 'HTL-', visa: 'VISA-', grp: 'GRP-' },
+  cyber: { inv: 'MSC-', tkt: 'MSC-SVC-', qte: 'MSC-QTE-', cn: 'MSC-CN-', htl: 'MSC-HTL-', visa: 'MSC-VISA-', grp: 'MSC-GRP-', exp: 'MSC-EXP-' },
+  demo: { inv: 'DEMO-', tkt: 'DEMO-TKT-', qte: 'DEMO-QTE-', cn: 'DEMO-CN-', htl: 'DEMO-HTL-', visa: 'DEMO-VISA-', grp: 'DEMO-GRP-', exp: 'DEMO-EXP-' },
+  client: { inv: 'INV-', tkt: 'TKT-', qte: 'QTE-', cn: 'CN-', htl: 'HTL-', visa: 'VISA-', grp: 'GRP-', exp: 'EXP-' },
 };
 
 // Two people creating an invoice/quote in the same second both see the same "next number"
@@ -95,8 +95,34 @@ const NUM_RESOURCE = {
   invoices: { table: 'invoices', key: 'inv', default: 'FAC-' },
   quotes: { table: 'quotes', key: 'qte', default: 'QTE-' },
 };
-async function computeNextNum(resourceKey, user) {
+// A saved company (client_id set from the dropdown, as opposed to a walk-in typed by hand)
+// gets its own invoice number sequence, stable regardless of what other invoices happen
+// in between - e.g. client "Boudy Corp" always sees BOUDY-001, BOUDY-002, BOUDY-003... The
+// prefix is derived from the client's name once and cached on the row so it never shifts
+// under them even if the name is edited later.
+const RESERVED_CLIENT_PREFIXES = new Set(['FAC', 'QTE', 'MSC', 'DEMO', 'INV', 'TKT', 'CN', 'HTL', 'VISA', 'GRP', 'CLIENT']);
+async function getClientInvoicePrefix(client) {
+  if (client.invoice_prefix) return client.invoice_prefix;
+  let base = (client.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+  if (!base) base = 'CLIENT' + client.id;
+  if (RESERVED_CLIENT_PREFIXES.has(base)) base = base + client.id;
+  const clash = await queryOne('SELECT id FROM clients WHERE invoice_prefix=? AND id<>?', [base, client.id]);
+  if (clash) base = base + client.id;
+  await run('UPDATE clients SET invoice_prefix=? WHERE id=?', [base, client.id]);
+  return base;
+}
+async function computeNextNum(resourceKey, user, clientId) {
   const cfg = NUM_RESOURCE[resourceKey];
+  if (resourceKey === 'invoices' && clientId) {
+    const client = await queryOne('SELECT * FROM clients WHERE id=?', [clientId]);
+    if (client) {
+      const prefix = await getClientInvoicePrefix(client);
+      const last = await queryOne('SELECT num FROM invoices WHERE client_id=? ORDER BY id DESC LIMIT 1', [clientId]);
+      if (!last) return prefix + '-001';
+      const m = last.num.match(/(\d+)$/);
+      return prefix + '-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
+    }
+  }
   if (isIsolated(user.role)) {
     const prefix = (NUM_PREFIX[user.role] || NUM_PREFIX.demo)[cfg.key];
     const last = await queryOne(`SELECT num FROM ${cfg.table} WHERE owner_id=? ORDER BY id DESC LIMIT 1`, [user.id]);
@@ -109,12 +135,12 @@ async function computeNextNum(resourceKey, user) {
   const m = last.num.match(/(\d+)$/);
   return cfg.default + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
 }
-async function withUniqueNumRetry(resourceKey, user, tryInsert, maxAttempts = 5) {
-  let num = await computeNextNum(resourceKey, user);
+async function withUniqueNumRetry(resourceKey, user, clientId, tryInsert, maxAttempts = 5) {
+  let num = await computeNextNum(resourceKey, user, clientId);
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try { return { num, row: await tryInsert(num) }; }
     catch (e) {
-      if (e.code === '23505' && attempt < maxAttempts) { num = await computeNextNum(resourceKey, user); continue; }
+      if (e.code === '23505' && attempt < maxAttempts) { num = await computeNextNum(resourceKey, user, clientId); continue; }
       throw e;
     }
   }
@@ -154,6 +180,7 @@ async function initDB() {
       city TEXT,
       tag TEXT DEFAULT 'Nouveau',
       notes TEXT,
+      invoice_prefix TEXT,
       created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
     );
     CREATE TABLE IF NOT EXISTS invoices (
@@ -287,6 +314,21 @@ async function initDB() {
       owner_name TEXT,
       created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
     );
+    CREATE TABLE IF NOT EXISTS expenses (
+      id SERIAL PRIMARY KEY,
+      num TEXT UNIQUE,
+      date TEXT,
+      category TEXT,
+      vendor TEXT,
+      description TEXT,
+      amount REAL DEFAULT 0,
+      currency TEXT DEFAULT 'KWD',
+      payment_method TEXT,
+      receipt TEXT,
+      owner_id INTEGER,
+      owner_name TEXT,
+      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    );
     CREATE TABLE IF NOT EXISTS payments (
       id SERIAL PRIMARY KEY,
       invoice_id INTEGER,
@@ -409,6 +451,29 @@ async function initDB() {
   const untokened = await query('SELECT id FROM invoices WHERE verify_token IS NULL');
   for (const inv of untokened) {
     await run('UPDATE invoices SET verify_token=? WHERE id=?', [crypto.randomBytes(12).toString('hex'), inv.id]);
+  }
+  await pool.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS invoice_prefix TEXT`);
+  // One-time backfill for per-client invoice numbering: any saved company that already has
+  // invoices but no invoice_prefix yet is getting this feature for the first time, so its
+  // past invoices are renumbered in creation order (oldest first) into that company's own
+  // sequence. invoice_prefix being set is itself the "already migrated" marker, so this
+  // never re-runs on a client once it's been done.
+  const unprefixedClients = await query(`
+    SELECT DISTINCT c.id, c.name FROM clients c
+    JOIN invoices i ON i.client_id = c.id
+    WHERE c.invoice_prefix IS NULL
+  `);
+  for (const c of unprefixedClients) {
+    const prefix = await getClientInvoicePrefix(c);
+    const clientInvoices = await query('SELECT id, num FROM invoices WHERE client_id=? ORDER BY created_at ASC, id ASC', [c.id]);
+    let seq = 1;
+    for (const inv of clientInvoices) {
+      const newNum = `${prefix}-${String(seq++).padStart(3, '0')}`;
+      if (newNum === inv.num) continue;
+      await run('UPDATE invoices SET num=? WHERE id=?', [newNum, inv.id]);
+      await run('UPDATE payments SET invoice_num=? WHERE invoice_id=?', [newNum, inv.id]);
+      await run('UPDATE credit_notes SET invoice_num=? WHERE invoice_id=?', [newNum, inv.id]);
+    }
   }
 
   const defaultSettings = {
@@ -713,17 +778,9 @@ app.delete('/api/clients/:id', auth, async (req, res) => {
 
 app.get('/api/invoices/next-num', auth, async (req, res) => {
   try {
-    if (isIsolated(req.session.user.role)) {
-      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).inv;
-      const last = await queryOne('SELECT num FROM invoices WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
-      if (!last) return res.json({ num: prefix + '001' });
-      const m = last.num.match(/(\d+)$/);
-      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-    }
-    const last = await queryOne('SELECT num FROM invoices ORDER BY id DESC LIMIT 1');
-    if (!last) return res.json({ num: 'FAC-001' });
-    const m = last.num.match(/(\d+)$/);
-    res.json({ num: 'FAC-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+    const clientId = req.query.client_id ? parseInt(req.query.client_id) : null;
+    const num = await computeNextNum('invoices', req.session.user, clientId);
+    res.json({ num });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/invoices', auth, async (req, res) => {
@@ -1262,7 +1319,7 @@ app.post('/api/invoices', auth, async (req, res) => {
     const { client_id, client_name, client_address, client_phone, client_fax, status, date, due_date, due_days, tax, deposit, notes, currency, rows } = req.body;
     const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
     const taxA = parseFloat(tax) || 0, depA = parseFloat(deposit) || 0;
-    const { num, row: r } = await withUniqueNumRetry('invoices', req.session.user, (num) => queryOne(
+    const { num, row: r } = await withUniqueNumRetry('invoices', req.session.user, client_id || null, (num) => queryOne(
       'INSERT INTO invoices (num,client_id,client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name,verify_token) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
       [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'pending', cleanDate(date), cleanDate(due_date), due_days || 7, sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name, crypto.randomBytes(12).toString('hex')]));
     for (const row of (rows || [])) {
@@ -1365,7 +1422,7 @@ app.post('/api/quotes', auth, async (req, res) => {
     const { client_id, client_name, client_address, client_phone, client_fax, status, date, valid_until, tax, deposit, notes, currency, rows } = req.body;
     const sub = (rows || []).reduce((a, r) => a + (parseFloat(r.price) || 0), 0);
     const taxA = parseFloat(tax) || 0, depA = parseFloat(deposit) || 0;
-    const { num, row: r } = await withUniqueNumRetry('quotes', req.session.user, (num) => queryOne(
+    const { num, row: r } = await withUniqueNumRetry('quotes', req.session.user, null, (num) => queryOne(
       'INSERT INTO quotes (num,client_id,client_name,client_address,client_phone,client_fax,status,date,valid_until,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
       [num, client_id || null, client_name, client_address || '', client_phone || '', client_fax || '', status || 'draft', cleanDate(date), cleanDate(valid_until), sub, taxA, depA, sub + taxA - depA, currency || 'KWD', notes || '', req.session.user.id, req.session.user.display_name]));
     for (const row of (rows || [])) {
@@ -1428,7 +1485,7 @@ app.post('/api/quotes/:id/convert', auth, async (req, res) => {
     if (qt.converted_invoice_id) return res.status(400).json({ error: 'Already converted' });
     const rows = await query('SELECT * FROM quote_rows WHERE quote_id=?', [qt.id]);
 
-    const { num, row: r } = await withUniqueNumRetry('invoices', req.session.user, (num) => queryOne(
+    const { num, row: r } = await withUniqueNumRetry('invoices', req.session.user, qt.client_id || null, (num) => queryOne(
       'INSERT INTO invoices (num,client_id,client_name,client_address,client_phone,client_fax,status,date,due_date,due_days,subtotal,tax,deposit,total,currency,notes,owner_id,owner_name,verify_token) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
       [num, qt.client_id || null, qt.client_name, qt.client_address || '', qt.client_phone || '', qt.client_fax || '', 'pending', cleanDate(new Date().toISOString()), null, 7, qt.subtotal, qt.tax, qt.deposit, qt.total, qt.currency || 'KWD', qt.notes || '', req.session.user.id, req.session.user.display_name, crypto.randomBytes(12).toString('hex')]));
     for (const row of rows) {
@@ -1924,6 +1981,130 @@ app.delete('/api/passports/:id', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* ─── EXPENSES ─── */
+app.get('/api/expenses/next-num', auth, async (req, res) => {
+  try {
+    if (isIsolated(req.session.user.role)) {
+      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).exp;
+      const last = await queryOne('SELECT num FROM expenses WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
+      if (!last) return res.json({ num: prefix + '001' });
+      const m = last.num.match(/(\d+)$/);
+      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+    }
+    const last = await queryOne('SELECT num FROM expenses ORDER BY id DESC LIMIT 1');
+    if (!last) return res.json({ num: 'EXP-001' });
+    const m = last.num.match(/(\d+)$/);
+    res.json({ num: 'EXP-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/expenses', auth, async (req, res) => {
+  try {
+    let q = 'SELECT * FROM expenses WHERE 1=1'; const p = [];
+    if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') { q += PATRON_EXCLUDE_ISOLATED; }
+    if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    q += ' ORDER BY date DESC, id DESC';
+    res.json(await query(q, p));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/expenses/:id', auth, async (req, res) => {
+  try {
+    const e2 = await queryOne('SELECT * FROM expenses WHERE id=?', [req.params.id]);
+    if (!e2) return res.status(404).json({ error: 'Not found' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(e2.owner_id)) return res.status(403).json({ error: 'Access denied' });
+    if (isIsolated(req.session.user.role) && e2.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    res.json(e2);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/expenses', auth, async (req, res) => {
+  try {
+    const { num, date, category, vendor, description, amount, currency, payment_method, receipt } = req.body;
+    if (!category || !String(category).trim()) return res.status(400).json({ error: 'Category is required' });
+    if (!(parseFloat(amount) > 0)) return res.status(400).json({ error: 'Amount must be greater than 0' });
+    const r = await queryOne(
+      'INSERT INTO expenses (num,date,category,vendor,description,amount,currency,payment_method,receipt,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
+      [num, cleanDate(date) || cleanDate(new Date().toISOString()), category.trim(), vendor || '', description || '', parseFloat(amount) || 0, currency || 'KWD', payment_method || 'Cash', receipt || null, req.session.user.id, req.session.user.display_name]);
+    res.json({ id: r.id, num });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/expenses/:id', auth, async (req, res) => {
+  try {
+    {
+      const e2 = await queryOne('SELECT owner_id FROM expenses WHERE id=?', [req.params.id]);
+      if (isIsolated(req.session.user.role) && (!e2 || e2.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && e2 && await isOwnedByIsolatedUser(e2.owner_id)) return res.status(403).json({ error: 'Access denied' });
+    }
+    const { date, category, vendor, description, amount, currency, payment_method, receipt } = req.body;
+    if (!category || !String(category).trim()) return res.status(400).json({ error: 'Category is required' });
+    if (!(parseFloat(amount) > 0)) return res.status(400).json({ error: 'Amount must be greater than 0' });
+    await run('UPDATE expenses SET date=?,category=?,vendor=?,description=?,amount=?,currency=?,payment_method=?,receipt=? WHERE id=?',
+      [cleanDate(date) || cleanDate(new Date().toISOString()), category.trim(), vendor || '', description || '', parseFloat(amount) || 0, currency || 'KWD', payment_method || 'Cash', receipt || null, req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/expenses/:id', auth, async (req, res) => {
+  try {
+    {
+      const e2 = await queryOne('SELECT owner_id FROM expenses WHERE id=?', [req.params.id]);
+      if (isIsolated(req.session.user.role) && (!e2 || e2.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
+      if (req.session.user.role === 'patron' && e2 && await isOwnedByIsolatedUser(e2.owner_id)) return res.status(403).json({ error: 'Access denied' });
+    }
+    await run('DELETE FROM expenses WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/expenses/report/pdf', auth, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let q = 'SELECT * FROM expenses WHERE 1=1'; const p = [];
+    if (req.session.user.role === 'employe') { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (req.session.user.role === 'patron') { q += PATRON_EXCLUDE_ISOLATED; }
+    if (isIsolated(req.session.user.role)) { q += ' AND owner_id=?'; p.push(req.session.user.id); }
+    if (from) { q += ' AND date>=?'; p.push(from); }
+    if (to) { q += ' AND date<=?'; p.push(to); }
+    q += ' ORDER BY date ASC, id ASC';
+    const rows = await query(q, p);
+    const s = await getScopedSettings(req.session.user);
+    const rasterized = await rasterizeBrandAssets(s); Object.assign(s, rasterized);
+    const currency = rows[0]?.currency || 'KWD';
+    const totalAmount = rows.reduce((a, r) => a + (parseFloat(r.amount) || 0), 0);
+    const byCat = {};
+    for (const r of rows) byCat[r.category] = (byCat[r.category] || 0) + (parseFloat(r.amount) || 0);
+    const cols = [
+      { label: 'DATE', w: 60, fmt: fmtDatePdf },
+      { label: '#', w: 65, bold: true, color: '#0a3258' },
+      { label: 'CATEGORY', w: 100 },
+      { label: 'VENDOR', w: 120 },
+      { label: 'METHOD', w: 75 },
+      { label: 'AMOUNT', w: 0, align: 'right', bold: true },
+    ];
+    cols[cols.length - 1].w = (595.28 - 80) - cols.slice(0, -1).reduce((a, c) => a + c.w, 0);
+    const dataRows = rows.map(r => [fmtDatePdf(r.date), r.num, r.category, r.vendor || '—', r.payment_method || '—', money(r.amount, r.currency)]);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Expense-Report.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    doc.pipe(res);
+    let y = pdfLetterhead(doc, { title: 'EXPENSE REPORT', s, metaRows: [['DATE:', new Date().toLocaleDateString('en-GB')], ['PERIOD:', `${from ? fmtDatePdf(from) : 'start'} – ${to ? fmtDatePdf(to) : 'today'}`]] });
+    y = pdfTable(doc, { x: 40, y, colsRight: 595.28 - 40, cols, dataRows, zebra: true });
+    y += 10;
+    const catEntries = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+    if (catEntries.length) {
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#0a3258').text('By category', 40, y);
+      y += 16;
+      for (const [cat, amt] of catEntries) {
+        doc.font('Helvetica').fontSize(9).fillColor('#666666').text(cat, 40, y, { width: 300 });
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#333333').text(money(amt, currency), 555.28 - 150, y, { width: 150, align: 'right' });
+        y += 14;
+      }
+      y += 8;
+    }
+    doc.rect(595.28 - 40 - 250, y, 250, 24).fill('#0a3258');
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#ffffff').text('TOTAL', 595.28 - 40 - 240, y + 7, { width: 130 });
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#ffffff').text(money(totalAmount, currency), 595.28 - 40 - 250, y + 7, { width: 240, align: 'right' });
+    doc.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/invoices/:id/payments', auth, async (req, res) => {
   try {
     const inv = await queryOne('SELECT * FROM invoices WHERE id=?', [req.params.id]);
@@ -2112,6 +2293,19 @@ app.get('/api/reports/summary', auth, async (req, res) => {
       : isPatron
         ? await queryOne(`SELECT COUNT(*) as c FROM clients WHERE ${ISOLATED_OWNER_COND}`)
         : await queryOne('SELECT COUNT(*) as c FROM clients');
+
+    let expConds = []; const expP = [];
+    if (from) { expConds.push('date>=?'); expP.push(from); }
+    if (to) { expConds.push('date<=?'); expP.push(to); }
+    if (isIsolatedUser) { expConds.push('owner_id=?'); expP.push(req.session.user.id); }
+    if (isPatron) expConds.push(ISOLATED_OWNER_COND);
+    const expW = expConds.length ? 'WHERE ' + expConds.join(' AND ') : '';
+    const expenses = await query(`SELECT * FROM expenses ${expW}`, expP);
+    const primaryExpenses = expenses.filter(e => currencyOf(e) === primaryCurrency);
+    const expensesTotal = primaryExpenses.reduce((a, e) => a + (parseFloat(e.amount) || 0), 0);
+    const expensesByCategory = {};
+    for (const e of primaryExpenses) expensesByCategory[e.category] = (expensesByCategory[e.category] || 0) + (parseFloat(e.amount) || 0);
+
     res.json({
       currency: primaryCurrency,
       byCurrency,
@@ -2121,7 +2315,9 @@ app.get('/api/reports/summary', auth, async (req, res) => {
       invoiceCount: primaryInv.length,
       clientCount: parseInt(countResult.c),
       byMonth, byClient,
-      topClients: Object.entries(byClient).sort((a, b) => b[1] - a[1]).slice(0, 5)
+      topClients: Object.entries(byClient).sort((a, b) => b[1] - a[1]).slice(0, 5),
+      expensesTotal, expensesByCategory, expenseCount: primaryExpenses.length,
+      netTotal: byStatus.paid - expensesTotal,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

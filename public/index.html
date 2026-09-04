@@ -79,6 +79,7 @@
         <div class="nav-item" data-page="new-passport"><i class="ti ti-file-certificate"></i><span>New Passport</span></div>
         <div class="nav-sep">Finance</div>
         <div class="nav-item" data-page="payments"><i class="ti ti-credit-card"></i><span>Payments</span></div>
+        <div class="nav-item" data-page="expenses"><i class="ti ti-receipt-2"></i><span>Expenses</span></div>
         <div class="nav-item" data-page="credit-notes"><i class="ti ti-receipt-refund"></i><span>Credit Notes</span></div>
         <div class="nav-item" data-page="statements"><i class="ti ti-file-text"></i><span>Statements</span></div>
         <div class="nav-item" data-page="reports"><i class="ti ti-chart-bar"></i><span>Reports</span></div>
@@ -242,6 +243,37 @@
       <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="pj-notes" rows="3" placeholder="anything else worth remembering…"></textarea></div>
     </div>
     <div class="modal-actions"><button class="btn-secondary" onclick="closeModal('modal-project')">Cancel</button><button class="btn-save" id="btn-save-project">Save</button></div>
+  </div>
+</div>
+
+<!-- MODAL EXPENSE -->
+<div class="modal-bg hidden" id="modal-expense">
+  <div class="modal-box" style="max-width:520px">
+    <div class="modal-header"><span class="modal-title" id="modal-expense-title">New Expense</span><button class="modal-close" onclick="closeModal('modal-expense')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-expense-id"/>
+      <div class="modal-grid2">
+        <div class="form-group"><label class="form-label">Expense #</label><input class="form-input" id="ex-num" readonly style="background:#f5f5f5"/></div>
+        <div class="form-group"><label class="form-label">Date *</label><input type="date" class="form-input" id="ex-date"/></div>
+        <div class="form-group"><label class="form-label">Category *</label><select class="form-input" id="ex-category" onchange="document.getElementById('ex-category-other').classList.toggle('hidden',this.value!=='Other')">
+          <option>Rent</option><option>Salaries &amp; Wages</option><option>Utilities</option><option>Software &amp; Subscriptions</option><option>Marketing &amp; Advertising</option><option>Travel</option><option>Office Supplies</option><option>Equipment</option><option>Professional Services</option><option>Insurance</option><option>Taxes &amp; Fees</option><option>Bank Charges</option><option>Other</option>
+        </select></div>
+        <div class="form-group hidden" id="ex-category-other"><label class="form-label">Specify category</label><input class="form-input" id="ex-category-other-input" placeholder="e.g. Team lunch"/></div>
+        <div class="form-group"><label class="form-label">Vendor / Paid to</label><input class="form-input" id="ex-vendor" placeholder="e.g. Ogero, Alfa, landlord…"/></div>
+        <div class="form-group"><label class="form-label">Payment method</label><select class="form-input" id="ex-method">
+          <option value="Cash">💵 Cash</option>
+          <option value="Bank Transfer">🏦 Bank Transfer</option>
+          <option value="Cheque">📝 Cheque</option>
+          <option value="Card">💳 Credit Card</option>
+          <option value="Other">🔄 Other</option>
+        </select></div>
+        <div class="form-group"><label class="form-label">Amount *</label><input type="number" min="0" step="0.01" class="form-input" id="ex-amount"/></div>
+        <div class="form-group"><label class="form-label">Currency</label><select class="form-input" id="ex-currency"><option>KWD</option><option>USD</option><option>EUR</option><option>LBP</option><option>AED</option><option>SAR</option></select></div>
+        <div class="form-group full"><label class="form-label">Description</label><textarea class="form-input" id="ex-description" rows="2" placeholder="what was this expense for?"></textarea></div>
+        <div class="form-group full"><label class="form-label">Receipt</label><input type="file" accept="image/*,.pdf" class="form-input" onchange="uploadExpenseReceipt(this)"/><div id="ex-receipt-preview" style="margin-top:8px"><span style="font-size:12px;color:#aaa">No receipt attached</span></div></div>
+      </div>
+    </div>
+    <div class="modal-actions"><button class="btn-secondary" onclick="closeModal('modal-expense')">Cancel</button><button class="btn-save" id="btn-save-expense">Save</button></div>
   </div>
 </div>
 

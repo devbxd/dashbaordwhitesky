@@ -326,7 +326,7 @@ const SKELETON_PAGE='<div class="skeleton-page"><div class="skeleton skeleton-bl
 // covers both the skeleton appearing and the real content replacing it, without needing
 // every one of the ~30 page*() render functions to know about the animation themselves.
 new MutationObserver(()=>{const mc=document.getElementById('main-content');mc.classList.remove('page-enter');void mc.offsetWidth;mc.classList.add('page-enter');}).observe(document.getElementById('main-content'),{childList:true});
-function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML=SKELETON_PAGE;const pages={dashboard:pageDashboard,clients:pageClients,catalog:pageCatalog,quotes:pageQuotes,'new-quote':pageNewQuote,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,hotels:pageHotels,'new-hotel':pageNewHotel,visas:pageVisas,'new-visa':pageNewVisa,groups:pageGroups,'new-group':pageNewGroup,passports:pagePassports,'new-passport':pageNewPassport,payments:pagePayments,'credit-notes':pageCreditNotes,statements:pageStatements,reports:pageReports,settings:pageSettings,admin:pageAdmin,projects:pageProjects};if(pages[page])pages[page](mc);}
+function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML=SKELETON_PAGE;const pages={dashboard:pageDashboard,clients:pageClients,catalog:pageCatalog,quotes:pageQuotes,'new-quote':pageNewQuote,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,hotels:pageHotels,'new-hotel':pageNewHotel,visas:pageVisas,'new-visa':pageNewVisa,groups:pageGroups,'new-group':pageNewGroup,passports:pagePassports,'new-passport':pageNewPassport,payments:pagePayments,expenses:pageExpenses,'credit-notes':pageCreditNotes,statements:pageStatements,reports:pageReports,settings:pageSettings,admin:pageAdmin,projects:pageProjects};if(pages[page])pages[page](mc);}
 
 /* DASHBOARD */
 function deadlineWhen(days){if(days<0)return`${-days}d overdue`;if(days===0)return'Today';if(days===1)return'Tomorrow';return`in ${days}d`;}
@@ -345,12 +345,15 @@ ${rpt.otherCurrencies&&rpt.otherCurrencies.length?`<div class="info-box"><i clas
   <div class="stat-card"><div class="stat-icon" style="background:#fdecea"><i class="ti ti-alert-triangle" style="color:#b71c1c"></i></div><div class="stat-label">Overdue</div><div class="stat-value" style="color:#b71c1c">${fmt(rpt.overdue,rpt.currency)}</div><div class="stat-detail">${allInvoices.filter(i=>i.status==='overdue').length} invoice(s)</div></div>
   <div class="stat-card"><div class="stat-icon" style="background:#deeeff"><i class="ti ti-users" style="color:#0a3258"></i></div><div class="stat-label">Clients</div><div class="stat-value">${rpt.clientCount}</div></div>
   <div class="stat-card"><div class="stat-icon" style="background:#f0e8ff"><i class="ti ti-file-invoice" style="color:#5b21b6"></i></div><div class="stat-label">Total Invoices</div><div class="stat-value">${rpt.invoiceCount}</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#fdecea"><i class="ti ti-receipt-2" style="color:#b71c1c"></i></div><div class="stat-label">Expenses</div><div class="stat-value" style="color:#b71c1c">${fmt(rpt.expensesTotal||0,rpt.currency)}</div><div class="stat-detail">${rpt.expenseCount||0} expense(s)</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:${(rpt.netTotal||0)>=0?'#e6f9ee':'#fdecea'}"><i class="ti ti-scale" style="color:${(rpt.netTotal||0)>=0?'#1a7a3a':'#b71c1c'}"></i></div><div class="stat-label">Net (Collected − Expenses)</div><div class="stat-value" style="color:${(rpt.netTotal||0)>=0?'#1a7a3a':'#b71c1c'}">${fmt(rpt.netTotal||0,rpt.currency)}</div></div>
 </div>
 <div style="margin-bottom:1.1rem"><div style="font-size:11px;color:#aaa;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Quick Actions</div>
 <div class="quick-grid">
   <div class="quick-action" onclick="showPage('new-invoice')"><i class="ti ti-file-plus"></i><span>New Invoice</span></div>
   <div class="quick-action" onclick="showPage('new-ticket')"><i class="${isCyber()?'ti ti-briefcase':'ti ti-ticket'}"></i><span>${dl().newTicketNav}</span></div>
   <div class="quick-action" onclick="openClientModal()"><i class="ti ti-user-plus"></i><span>New Client</span></div>
+  <div class="quick-action" onclick="openExpenseModal()"><i class="ti ti-receipt-2"></i><span>New Expense</span></div>
   <div class="quick-action" onclick="showPage('reports')"><i class="ti ti-chart-bar"></i><span>Reports</span></div>
   ${dl().importPdf?`<div class="quick-action" onclick="openPdfImport()"><i class="ti ti-file-import"></i><span>Import PDF</span></div>`:''}
 </div></div>
@@ -535,13 +538,14 @@ document.getElementById('btn-send-email').addEventListener('click',async()=>{
 
 
 
-function fillClient(sel){const o=sel.querySelector(`option[value="${sel.value}"]`);if(!o||!sel.value)return;[['inv-client-name','name'],['inv-client-addr','addr'],['inv-client-phone','phone'],['inv-client-fax','fax']].forEach(([id,k])=>{const el=document.getElementById(id);if(el)el.value=o.dataset[k]||'';});}
+async function fillClient(sel){const o=sel.querySelector(`option[value="${sel.value}"]`);if(o&&sel.value){[['inv-client-name','name'],['inv-client-addr','addr'],['inv-client-phone','phone'],['inv-client-fax','fax']].forEach(([id,k])=>{const el=document.getElementById(id);if(el)el.value=o.dataset[k]||'';});}await refreshInvNumPreview(sel.value);}
+async function refreshInvNumPreview(clientId){if(_editInvId)return;const el=document.getElementById('inv-num');if(!el)return;const{num}=await api('GET',`/api/invoices/next-num${clientId?`?client_id=${clientId}`:''}`);el.value=num;}
 function setAllAirlineType(val){editInvRows.forEach(r=>r.airline=val);renderInvRows();setTimeout(()=>{const sel=document.getElementById('col-airline-type');if(sel)sel.value=val;},10);}
 
 /* NEW/EDIT INVOICE */
 async function pageNewInvoice(mc){_editInvId=null;editInvRows=[{pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0}];[allClients,allItems]=await Promise.all([api('GET','/api/clients'),api('GET','/api/items')]);const{num}=await api('GET','/api/invoices/next-num');renderInvForm(mc,{num,date:today(),due_date:addDays(today(),parseInt(settings.invoice_due_days)||7),status:'pending',currency:settings.invoice_currency||'KWD',tax:0,deposit:0,due_days:settings.invoice_due_days||7});}
 async function editInvoice(id){_editInvId=id;const inv=await api('GET',`/api/invoices/${id}`);editInvRows=inv.rows&&inv.rows.length?inv.rows.map(r=>({...r,airlineRef:r.airlineRef||''})):[{pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0}];[allClients,allItems]=await Promise.all([api('GET','/api/clients'),api('GET','/api/items')]);const mc=document.getElementById('main-content');document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));renderInvForm(mc,inv);}
-function newInvoiceFor(cid,cname,caddr,cphone,cfax){showPage('new-invoice');setTimeout(()=>{const sel=document.getElementById('inv-client');if(sel)sel.value=cid;[['inv-client-name',cname],['inv-client-addr',caddr],['inv-client-phone',cphone],['inv-client-fax',cfax]].forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.value=v||'';});},150);}
+function newInvoiceFor(cid,cname,caddr,cphone,cfax){showPage('new-invoice');setTimeout(()=>{const sel=document.getElementById('inv-client');if(sel)sel.value=cid;[['inv-client-name',cname],['inv-client-addr',caddr],['inv-client-phone',cphone],['inv-client-fax',cfax]].forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.value=v||'';});refreshInvNumPreview(cid);},150);}
 
 function renderInvForm(mc,inv){
   const currencies=['KWD','USD','EUR','LBP','AED','SAR'];
@@ -1086,6 +1090,61 @@ function printPersonStmt(mode){
 /* PAYMENTS */
 async function pagePayments(mc){const[allPay,allInv]=await Promise.all([api('GET','/api/payments'),api('GET','/api/invoices')]);const paidInv=allInv.filter(i=>i.status==='paid'||i.status==='partial'||i.status==='refunded');const total=allPay.reduce((a,p)=>a+(parseFloat(p.amount)||0),0);mc.innerHTML=`<div class="page-header"><div><div class="page-title">Payments</div><div class="page-sub">${paidInv.length} invoice(s) — Collected: <strong>${fmt(total)}</strong></div></div></div><div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Total</th><th>Paid</th><th>Method</th><th>Status</th><th>Actions</th></tr></thead><tbody>${paidInv.length===0?`<tr><td colspan="8"><div class="empty-state"><i class="ti ti-cash-off"></i><h3>No paid invoices</h3></div></td></tr>`:paidInv.map(i=>{const invPays=allPay.filter(p=>p.invoice_id===i.id);const paidSoFar=invPays.reduce((a,p)=>a+(parseFloat(p.amount)||0),0);const isRefunded=i.status==='refunded';const methodLabel=invPays.length===0?'—':invPays.length===1?`<span class="pay-method-badge">${invPays[0].method}</span>`:`<span class="pay-method-badge">${invPays.length} payments</span>`;return`<tr style="${isRefunded?'background:#fffbe6':''}"><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewInvoice(${i.id})">${i.num}</td><td>${i.client_name}</td><td>${fmtDate(i.date)}</td><td style="font-weight:700;color:${isRefunded?'#b8860b':'#1a7a3a'}">${fmt(i.total,i.currency)}</td><td style="font-weight:700">${fmt(paidSoFar,i.currency)}</td><td>${methodLabel}</td><td>${statusBadge(i.status)}</td><td class="actions-cell">${!isRefunded?`<button class="btn-secondary" title="Mark as Refunded" onclick="markRefunded(${i.id})" style="color:#b8860b;border-color:#b8860b;font-size:11px;padding:4px 8px"><i class="ti ti-rotate-clockwise"></i> Refund</button>`:'<span style="background:#fffbe6;color:#b8860b;font-size:11px;font-weight:700;padding:3px 8px;border-radius:5px;border:1px solid #b8860b">✓ Refunded</span>'}<button class="btn-secondary" title="Mark unpaid" onclick="markUnpaidFromList(${i.id})" style="color:#c0392b;border-color:#f5c6c6;font-size:11px;padding:4px 8px"><i class="ti ti-x"></i> Unpaid</button></td></tr>`;}).join('')}</tbody></table></div></div>`;}
 async function markRefunded(id){if(!await confirmDialog('Mark this invoice as refunded?',{danger:false,confirmLabel:'Mark refunded'}))return;await api('PATCH',`/api/invoices/${id}/status`,{status:'refunded'});toast('✅ Invoice marked as refunded','success');showPage('payments');}
+
+/* EXPENSES */
+let allExpenses=[];
+const EXPENSE_CATEGORIES=['Rent','Salaries & Wages','Utilities','Software & Subscriptions','Marketing & Advertising','Travel','Office Supplies','Equipment','Professional Services','Insurance','Taxes & Fees','Bank Charges','Other'];
+async function pageExpenses(mc){allExpenses=await api('GET','/api/expenses');renderExpensesPage(mc,allExpenses);}
+function renderExpensesPage(mc,list){
+  const total=list.reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
+  const cur=list[0]?.currency||settings.invoice_currency||'KWD';
+  const byCat={};for(const e of list)byCat[e.category]=(byCat[e.category]||0)+(parseFloat(e.amount)||0);
+  const topCats=Object.entries(byCat).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">Expenses</div><div class="page-sub">${list.length} expense(s) — Total: <strong>${fmt(total,cur)}</strong></div></div><div class="header-actions"><button class="btn-new" onclick="openExpenseModal()"><i class="ti ti-plus"></i> New Expense</button><a class="btn-secondary" href="/api/expenses/report/pdf" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px"><i class="ti ti-file-download"></i> Download Report</a></div></div>
+${topCats.length?`<div class="card"><div class="card-header"><span class="card-title"><i class="ti ti-chart-pie" style="vertical-align:-2px;margin-right:6px;color:#b71c1c"></i>Top categories</span></div><table style="width:100%;border-collapse:collapse">${topCats.map(([cat,amt])=>`<tr><td style="padding:6px 4px;font-weight:600">${cat}</td><td style="padding:6px 4px;text-align:right;font-weight:700;color:#b71c1c">${fmt(amt,cur)}</td></tr>`).join('')}</table></div>`:''}
+<div class="filter-bar"><input type="text" placeholder="Vendor, description, #…" id="ex-q" oninput="filterExpenses()"/><select id="ex-f-category" onchange="filterExpenses()"><option value="">All categories</option>${EXPENSE_CATEGORIES.map(c=>`<option>${c}</option>`).join('')}</select><input type="date" id="ex-from" onchange="filterExpenses()"/><input type="date" id="ex-to" onchange="filterExpenses()"/></div>
+<div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>#</th><th>Date</th><th>Category</th><th>Vendor</th><th>Method</th><th>Amount</th><th>Receipt</th><th>Actions</th></tr></thead><tbody id="ex-tbody">${expenseRowsHtml(list)}</tbody></table></div></div>`;
+}
+function expenseRowsHtml(list){if(!list.length)return`<tr><td colspan="8"><div class="empty-state"><i class="ti ti-receipt-2"></i><h3>No expenses yet</h3><p>Track rent, salaries, subscriptions and everything else the business spends.</p></div></td></tr>`;return list.map(e=>`<tr><td style="font-weight:700">${e.num||'—'}</td><td>${fmtDate(e.date)}</td><td>${e.category}</td><td>${e.vendor||'—'}</td><td><span class="pay-method-badge">${e.payment_method||'—'}</span></td><td style="font-weight:700;color:#b71c1c">${fmt(e.amount,e.currency)}</td><td>${e.receipt?`<a href="${e.receipt}" target="_blank"><i class="ti ti-paperclip"></i> View</a>`:'—'}</td><td class="actions-cell"><button class="action-btn edit" onclick="openExpenseModal(${e.id})"><i class="ti ti-edit"></i></button><button class="action-btn danger" onclick="deleteExpense(${e.id})"><i class="ti ti-trash"></i></button></td></tr>`).join('');}
+function filterExpenses(){const q=(document.getElementById('ex-q')?.value||'').toLowerCase();const cat=document.getElementById('ex-f-category')?.value||'';const from=document.getElementById('ex-from')?.value||'';const to=document.getElementById('ex-to')?.value||'';const f=allExpenses.filter(e=>(!q||(e.vendor||'').toLowerCase().includes(q)||(e.description||'').toLowerCase().includes(q)||(e.num||'').toLowerCase().includes(q))&&(!cat||e.category===cat)&&(!from||e.date>=from)&&(!to||e.date<=to));const tb=document.getElementById('ex-tbody');if(tb)tb.innerHTML=expenseRowsHtml(f);}
+
+let _editExpenseId=null,_editExpenseReceipt=null;
+async function openExpenseModal(id){
+  const e=id?allExpenses.find(x=>x.id===id):null;
+  _editExpenseId=id||null;_editExpenseReceipt=e?.receipt||null;
+  document.getElementById('modal-expense-title').textContent=e?'Edit Expense':'New Expense';
+  document.getElementById('edit-expense-id').value=e?e.id:'';
+  if(!e){const{num}=await api('GET','/api/expenses/next-num');document.getElementById('ex-num').value=num;}
+  else document.getElementById('ex-num').value=e.num||'';
+  document.getElementById('ex-date').value=e?.date||today();
+  const knownCat=e&&EXPENSE_CATEGORIES.includes(e.category);
+  document.getElementById('ex-category').value=knownCat?e.category:'Rent';
+  document.getElementById('ex-category-other').classList.toggle('hidden',!(e&&!knownCat));
+  document.getElementById('ex-category-other-input').value=(e&&!knownCat)?e.category:'';
+  document.getElementById('ex-vendor').value=e?.vendor||'';
+  document.getElementById('ex-method').value=e?.payment_method||'Cash';
+  document.getElementById('ex-amount').value=e?.amount||'';
+  document.getElementById('ex-currency').value=e?.currency||settings.invoice_currency||'KWD';
+  document.getElementById('ex-description').value=e?.description||'';
+  const prev=document.getElementById('ex-receipt-preview');
+  if(prev)prev.innerHTML=_editExpenseReceipt?`<a href="${_editExpenseReceipt}" target="_blank" style="font-size:12px;color:#1A6FB5;font-weight:700"><i class="ti ti-file-check"></i> View attached receipt</a>`:'<span style="font-size:12px;color:#aaa">No receipt attached</span>';
+  openModal('modal-expense');
+}
+function uploadExpenseReceipt(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=(e)=>{_editExpenseReceipt=e.target.result;const prev=document.getElementById('ex-receipt-preview');if(prev)prev.innerHTML=`<a href="${_editExpenseReceipt}" target="_blank" style="font-size:12px;color:#1A6FB5;font-weight:700"><i class="ti ti-file-check"></i> View attached receipt</a>`;toast('Receipt ready — click Save to attach it','success');};reader.readAsDataURL(file);}
+document.getElementById('btn-save-expense').addEventListener('click',async()=>{
+  const catSel=document.getElementById('ex-category').value;
+  const category=catSel==='Other'?document.getElementById('ex-category-other-input').value.trim():catSel;
+  if(!category){toast('Category is required','error');return;}
+  const amount=parseFloat(document.getElementById('ex-amount').value)||0;
+  if(amount<=0){toast('Enter an amount greater than 0','error');return;}
+  const body={num:document.getElementById('ex-num').value,date:document.getElementById('ex-date').value,category,vendor:document.getElementById('ex-vendor').value.trim(),description:document.getElementById('ex-description').value.trim(),amount,currency:document.getElementById('ex-currency').value,payment_method:document.getElementById('ex-method').value,receipt:_editExpenseReceipt};
+  const id=document.getElementById('edit-expense-id').value;
+  const r=id?await api('PUT',`/api/expenses/${id}`,body):await api('POST','/api/expenses',body);
+  if(r&&r.error){toast(r.error,'error');return;}
+  toast(id?'✅ Expense updated':'✅ Expense added','success');closeModal('modal-expense');showPage('expenses');
+});
+async function deleteExpense(id){if(!await confirmDialog('Delete this expense?'))return;await api('DELETE',`/api/expenses/${id}`);toast('Expense deleted');showPage('expenses');}
 async function markUnpaidFromList(id){if(!await confirmDialog('The payment will be deleted.',{title:'Mark this invoice as unpaid?'}))return;await api('PATCH',`/api/invoices/${id}/status`,{status:'pending'});toast('Invoice marked as unpaid','error');showPage('payments');}
 
 /* CREDIT NOTES */
