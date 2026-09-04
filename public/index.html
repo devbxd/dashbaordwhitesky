@@ -84,6 +84,8 @@
         <div class="nav-item" data-page="reports"><i class="ti ti-chart-bar"></i><span>Reports</span></div>
         <div class="nav-sep" id="admin-sep">Admin</div>
         <div class="nav-item hidden" id="admin-nav-item" data-page="admin"><i class="ti ti-shield-cog"></i><span>Admin</span></div>
+        <div class="nav-sep hidden" id="projects-sep">My Projects</div>
+        <div class="nav-item hidden" id="projects-nav-item" data-page="projects"><i class="ti ti-server-2"></i><span>Projects</span></div>
         <div class="nav-sep">Account</div>
         <div class="nav-item" data-page="settings"><i class="ti ti-settings"></i><span>Settings</span></div>
       </nav>
@@ -224,6 +226,22 @@
       <div class="form-group"><label class="form-label">Role</label><select class="form-input" id="u-role"><option value="employe">Staff</option><option value="patron">Owner</option><option value="cyber">Owner (Cyber — isolated)</option><option value="client">User (Client — isolated)</option><option value="demo">User (Demo — isolated)</option></select><span style="font-size:11px;color:#aaa;font-weight:400;display:block;margin-top:4px">Cyber/Client/Demo are isolated accounts with their own separate data — only change this if you know what it does.</span></div>
     </div>
     <div class="modal-actions"><button class="btn-secondary" onclick="closeModal('modal-user')">Cancel</button><button class="btn-save" id="btn-save-user">Create</button></div>
+  </div>
+</div>
+
+<!-- MODAL DEV PROJECT -->
+<div class="modal-bg hidden" id="modal-project">
+  <div class="modal-box" style="max-width:440px">
+    <div class="modal-header"><span class="modal-title" id="modal-project-title">New Project</span><button class="modal-close" onclick="closeModal('modal-project')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-project-id"/>
+      <div class="form-group"><label class="form-label">Name *</label><input class="form-input" id="pj-name" placeholder="e.g. WhiteSky Dashboard"/></div>
+      <div class="form-group"><label class="form-label">Supabase email</label><input class="form-input" id="pj-supabase" placeholder="which login was used, if any"/></div>
+      <div class="form-group"><label class="form-label">Deployment site</label><input class="form-input" id="pj-deploy" placeholder="e.g. Render, Vercel, Netlify…"/></div>
+      <div class="form-group"><label class="form-label">Domain bought at</label><input class="form-input" id="pj-domain" placeholder="e.g. Namecheap, GoDaddy…"/></div>
+      <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="pj-notes" rows="3" placeholder="anything else worth remembering…"></textarea></div>
+    </div>
+    <div class="modal-actions"><button class="btn-secondary" onclick="closeModal('modal-project')">Cancel</button><button class="btn-save" id="btn-save-project">Save</button></div>
   </div>
 </div>
 

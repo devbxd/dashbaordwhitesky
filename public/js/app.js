@@ -305,8 +305,10 @@ function applyBranding(){
   const ntSpan=document.querySelector('.nav-item[data-page="new-ticket"] span');if(ntSpan)ntSpan.textContent=labels.newTicketNav;
   const ntIcon=document.querySelector('.nav-item[data-page="new-ticket"] i');if(ntIcon)ntIcon.className=cyber?'ti ti-briefcase':'ti ti-ticket';
   const isPatron=currentUser&&currentUser.role==='patron';
-  document.getElementById('admin-nav-item')?.classList.toggle('hidden',!isPatron);
-  document.getElementById('admin-sep')?.classList.toggle('hidden',!isPatron);
+  document.getElementById('admin-nav-item')?.classList.toggle('hidden',!(isPatron||cyber));
+  document.getElementById('admin-sep')?.classList.toggle('hidden',!(isPatron||cyber));
+  document.getElementById('projects-nav-item')?.classList.toggle('hidden',!cyber);
+  document.getElementById('projects-sep')?.classList.toggle('hidden',!cyber);
   // M&S Cyber Systems isn't a travel agency — these modules (ticket sales, hotel bookings,
   // visas, group trips, passport docs) don't apply to that business, so they're hidden for
   // the 'cyber' account instead of cluttering its sidebar with irrelevant sections.
@@ -324,7 +326,7 @@ const SKELETON_PAGE='<div class="skeleton-page"><div class="skeleton skeleton-bl
 // covers both the skeleton appearing and the real content replacing it, without needing
 // every one of the ~30 page*() render functions to know about the animation themselves.
 new MutationObserver(()=>{const mc=document.getElementById('main-content');mc.classList.remove('page-enter');void mc.offsetWidth;mc.classList.add('page-enter');}).observe(document.getElementById('main-content'),{childList:true});
-function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML=SKELETON_PAGE;const pages={dashboard:pageDashboard,clients:pageClients,catalog:pageCatalog,quotes:pageQuotes,'new-quote':pageNewQuote,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,hotels:pageHotels,'new-hotel':pageNewHotel,visas:pageVisas,'new-visa':pageNewVisa,groups:pageGroups,'new-group':pageNewGroup,passports:pagePassports,'new-passport':pageNewPassport,payments:pagePayments,'credit-notes':pageCreditNotes,statements:pageStatements,reports:pageReports,settings:pageSettings,admin:pageAdmin};if(pages[page])pages[page](mc);}
+function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML=SKELETON_PAGE;const pages={dashboard:pageDashboard,clients:pageClients,catalog:pageCatalog,quotes:pageQuotes,'new-quote':pageNewQuote,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,hotels:pageHotels,'new-hotel':pageNewHotel,visas:pageVisas,'new-visa':pageNewVisa,groups:pageGroups,'new-group':pageNewGroup,passports:pagePassports,'new-passport':pageNewPassport,payments:pagePayments,'credit-notes':pageCreditNotes,statements:pageStatements,reports:pageReports,settings:pageSettings,admin:pageAdmin,projects:pageProjects};if(pages[page])pages[page](mc);}
 
 /* DASHBOARD */
 function deadlineWhen(days){if(days<0)return`${-days}d overdue`;if(days===0)return'Today';if(days===1)return'Tomorrow';return`in ${days}d`;}
@@ -1290,6 +1292,45 @@ document.getElementById('btn-save-user').addEventListener('click',async()=>{cons
 async function deleteUser(id){if(!await confirmDialog('Delete this user?'))return;await api('DELETE',`/api/users/${id}`);toast('User deleted');showPage('settings');}
 
 /* ADMIN (patron only) */
+/* MY PROJECTS (Cyber only) — a private reference table for the sites Boudy manages outside
+   this app: which Supabase login, which host, where the domain was bought. */
+let _projects=[];
+async function pageProjects(mc){
+  _projects=await api('GET','/api/dev-projects');
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">My Projects</div><div class="page-sub">Where each site lives — Supabase, hosting, domain — for next time something needs editing</div></div><div class="header-actions"><button class="btn-new" onclick="openProjectModal()"><i class="ti ti-plus"></i> New Project</button></div></div>
+<div class="card" style="padding:0;overflow:hidden">
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Supabase Email</th><th>Deployment</th><th>Domain Bought At</th><th>Notes</th><th>Actions</th></tr></thead><tbody>${_projects.length===0?`<tr><td colspan="6"><div class="empty-state"><i class="ti ti-server-2"></i><h3>No projects yet</h3><p>Add one for each site you manage.</p></div></td></tr>`:_projects.map(p=>`<tr><td style="font-weight:700">${p.name}</td><td style="color:#666">${p.supabase_email||'—'}</td><td>${p.deploy_site||'—'}</td><td>${p.domain_registrar||'—'}</td><td style="color:#888;font-size:12px;max-width:220px">${(p.notes||'—').replace(/</g,'&lt;')}</td><td class="actions-cell"><button class="action-btn edit" onclick="openProjectModal(${p.id})"><i class="ti ti-edit"></i></button><button class="action-btn danger" onclick="deleteProject(${p.id})"><i class="ti ti-trash"></i></button></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+function openProjectModal(id){
+  const isEdit=!!id;
+  const p=isEdit?_projects.find(x=>x.id===id):null;
+  document.getElementById('modal-project-title').textContent=isEdit?'Edit Project':'New Project';
+  document.getElementById('edit-project-id').value=id||'';
+  document.getElementById('pj-name').value=p?.name||'';
+  document.getElementById('pj-supabase').value=p?.supabase_email||'';
+  document.getElementById('pj-deploy').value=p?.deploy_site||'';
+  document.getElementById('pj-domain').value=p?.domain_registrar||'';
+  document.getElementById('pj-notes').value=p?.notes||'';
+  document.getElementById('btn-save-project').textContent=isEdit?'Update':'Save';
+  openModal('modal-project');
+}
+document.getElementById('btn-save-project').addEventListener('click',async()=>{
+  const id=document.getElementById('edit-project-id').value;
+  const body={name:document.getElementById('pj-name').value.trim(),supabase_email:document.getElementById('pj-supabase').value.trim(),deploy_site:document.getElementById('pj-deploy').value.trim(),domain_registrar:document.getElementById('pj-domain').value.trim(),notes:document.getElementById('pj-notes').value.trim()};
+  if(!body.name){toast('Name is required','error');return;}
+  const r=id?await api('PUT',`/api/dev-projects/${id}`,body):await api('POST','/api/dev-projects',body);
+  if(r&&r.error){toast(r.error,'error');return;}
+  closeModal('modal-project');
+  toast(id?'✅ Project updated':'✅ Project added','success');
+  showPage('projects');
+});
+async function deleteProject(id){
+  if(!await confirmDialog('This only removes it from your list — it does not touch the actual site.',{title:'Delete this project entry?'}))return;
+  await api('DELETE',`/api/dev-projects/${id}`);
+  toast('Project deleted');
+  showPage('projects');
+}
 async function pageAdmin(mc){
   const[users,invites]=await Promise.all([api('GET','/api/users'),api('GET','/api/invites')]);
   const roleLabel={patron:'Owner',employe:'Staff',demo:'User (Demo)',cyber:'Owner (Cyber)',client:'User (Client)'};

@@ -375,6 +375,21 @@ async function initDB() {
       used_at TEXT
     );
   `);
+  // Boudy's own reference table for the sites/projects he manages outside this app — which
+  // Supabase email, which host, where the domain was bought — so it's all in one place
+  // instead of scattered across memory next time something needs editing.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS dev_projects (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      supabase_email TEXT,
+      deploy_site TEXT,
+      domain_registrar TEXT,
+      notes TEXT,
+      owner_id INTEGER,
+      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    );
+  `);
   await pool.query(`ALTER TABLE visas ADD COLUMN IF NOT EXISTS visa_file TEXT`);
   // ticket_sales predates the currency column — every ticket was silently saved in whatever
   // the account's default currency is, ignoring the dropdown actually shown in the form.
@@ -531,6 +546,27 @@ async function patron(req, res, next) {
       return res.status(403).json({ error: 'Your account is not available. Contact +961 71 335 614 on WhatsApp.', deactivated: true });
     }
   } catch (e) { return res.status(500).json({ error: e.message }); }
+  next();
+}
+// The owner-facing sales tools (who's using the system, invite codes, the sales page link)
+// matter to both people actually selling this — the WhiteSky owner and the Cyber account —
+// so this covers both, while account creation/edit/delete/deactivate stays patron-only
+// (that's real access control over other people's accounts, not just visibility).
+async function patronOrCyber(req, res, next) {
+  if (!req.session.user || (req.session.user.role !== 'patron' && req.session.user.role !== 'cyber')) return res.status(403).json({ error: 'Réservé au propriétaire' });
+  try {
+    const u = await queryOne('SELECT active FROM users WHERE id=?', [req.session.user.id]);
+    if (!u || u.active === false) {
+      req.session.destroy(() => {});
+      return res.status(403).json({ error: 'Your account is not available. Contact +961 71 335 614 on WhatsApp.', deactivated: true });
+    }
+  } catch (e) { return res.status(500).json({ error: e.message }); }
+  next();
+}
+// The dev-projects registry (which Supabase email, which host, where the domain was bought)
+// is Boudy's own reference for the sites he personally manages — not shared with WhiteSky.
+async function cyberOnly(req, res, next) {
+  if (!req.session.user || req.session.user.role !== 'cyber') return res.status(403).json({ error: 'Réservé au compte Cyber' });
   next();
 }
 
@@ -2134,7 +2170,7 @@ app.get('/api/upcoming', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/users', patron, async (req, res) => {
+app.get('/api/users', patronOrCyber, async (req, res) => {
   try { res.json(await query('SELECT id,username,role,display_name,active FROM users ORDER BY id')); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2148,21 +2184,56 @@ app.patch('/api/users/:id/active', patron, async (req, res) => {
 
 /* Invite codes — one single-use code per prospect, generated and handed out (WhatsApp,
    etc.) separately from the download link, so sharing the .exe alone can't mint accounts. */
-app.get('/api/invites', patron, async (req, res) => {
+app.get('/api/invites', patronOrCyber, async (req, res) => {
   try { res.json(await query('SELECT invites.*, u.display_name as used_by_name FROM invites LEFT JOIN users u ON u.id=invites.used_by ORDER BY invites.created_at DESC')); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post('/api/invites', patron, async (req, res) => {
+app.post('/api/invites', patronOrCyber, async (req, res) => {
   try {
     const code = crypto.randomBytes(4).toString('hex').toUpperCase();
     await run('INSERT INTO invites (code,created_by) VALUES (?,?)', [code, req.session.user.id]);
     res.json({ code });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.delete('/api/invites/:code', patron, async (req, res) => {
+app.delete('/api/invites/:code', patronOrCyber, async (req, res) => {
   try { await run('DELETE FROM invites WHERE code=? AND used=false', [req.params.code]); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+/* DEV PROJECTS — Boudy's private infrastructure registry, not visible to anyone else */
+app.get('/api/dev-projects', cyberOnly, async (req, res) => {
+  try { res.json(await query('SELECT * FROM dev_projects WHERE owner_id=? ORDER BY name ASC', [req.session.user.id])); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/dev-projects', cyberOnly, async (req, res) => {
+  try {
+    const { name, supabase_email, deploy_site, domain_registrar, notes } = req.body;
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Name is required' });
+    const r = await queryOne('INSERT INTO dev_projects (name,supabase_email,deploy_site,domain_registrar,notes,owner_id) VALUES (?,?,?,?,?,?) RETURNING id',
+      [name.trim(), supabase_email || '', deploy_site || '', domain_registrar || '', notes || '', req.session.user.id]);
+    res.json({ id: r.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/dev-projects/:id', cyberOnly, async (req, res) => {
+  try {
+    const p = await queryOne('SELECT owner_id FROM dev_projects WHERE id=?', [req.params.id]);
+    if (!p || p.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    const { name, supabase_email, deploy_site, domain_registrar, notes } = req.body;
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Name is required' });
+    await run('UPDATE dev_projects SET name=?,supabase_email=?,deploy_site=?,domain_registrar=?,notes=? WHERE id=?',
+      [name.trim(), supabase_email || '', deploy_site || '', domain_registrar || '', notes || '', req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/dev-projects/:id', cyberOnly, async (req, res) => {
+  try {
+    const p = await queryOne('SELECT owner_id FROM dev_projects WHERE id=?', [req.params.id]);
+    if (!p || p.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    await run('DELETE FROM dev_projects WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/users', patron, async (req, res) => {
   try {
     const r = await queryOne('INSERT INTO users (username,password,role,display_name) VALUES (?,?,?,?) RETURNING id',
