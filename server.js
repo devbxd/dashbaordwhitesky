@@ -792,7 +792,7 @@ function fmtDatePdf(d) {
 }
 // Pure drawing function — no req/res, no DB — so it can be exercised directly with fake data
 // instead of only ever being checked by clicking the button in a live app.
-function renderInvoicePdf(doc, { inv, rows, s, qrBuffer }) {
+function renderInvoicePdf(doc, { inv, rows, s, qrBuffer, cyber }) {
   const fmt = (n) => `${inv.currency || 'KWD'} ${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const NAVY = '#0a3258', SOFT = '#666666', FAINT = '#999999', LINE = '#e5eaf2';
   const pageW = doc.page.width, marginX = 40;
@@ -830,11 +830,12 @@ function renderInvoicePdf(doc, { inv, rows, s, qrBuffer }) {
   y = Math.max(doc.y, y + 60) + 18;
 
   // Table
+  const airlineLabel = cyber ? 'CATEGORY' : (rows.some(r => r.airline === 'Hotel') ? 'HOTEL' : 'AIRLINE');
   const cols = [
     { key: 'pnr', label: 'PNR #', w: 65 },
     { key: 'destination', label: 'DESTINATION', w: 95 },
     { key: 'passenger', label: 'PASSENGER', w: 140 },
-    { key: 'airline', label: 'AIRLINE', w: 70 },
+    { key: 'airline', label: airlineLabel, w: 70 },
     { key: 'travel_date', label: 'DATE', w: 75, fmt: fmtDatePdf },
     { key: 'price', label: 'PRICE', w: 0, align: 'right', fmt: (v) => fmt(v) },
   ];
@@ -851,7 +852,7 @@ function renderInvoicePdf(doc, { inv, rows, s, qrBuffer }) {
     x = marginX;
     doc.font('Helvetica').fontSize(9.5).fillColor('#333333');
     for (const c of cols) {
-      const raw = c.key === 'pnr' ? r.pnr : c.key === 'destination' ? r.destination : c.key === 'passenger' ? r.passenger : c.key === 'airline' ? r.airline : c.key === 'travel_date' ? r.travel_date : r.price;
+      const raw = c.key === 'pnr' ? r.pnr : c.key === 'destination' ? r.destination : c.key === 'passenger' ? r.passenger : c.key === 'airline' ? r.airlineRef : c.key === 'travel_date' ? r.travel_date : r.price;
       const val = c.fmt ? c.fmt(raw) : (raw || '—');
       doc.font(c.key === 'pnr' || c.key === 'price' ? 'Helvetica-Bold' : 'Helvetica').fillColor(c.key === 'pnr' ? NAVY : '#333333').text(String(val), x, y, { width: c.w, align: c.align || 'left' });
       x += c.w;
@@ -908,7 +909,7 @@ app.get('/api/invoices/:id/pdf', auth, async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${inv.num}.pdf"`);
     const doc = new PDFDocument({ size: 'A4', margin: 0 });
     doc.pipe(res);
-    renderInvoicePdf(doc, { inv, rows, s, qrBuffer });
+    renderInvoicePdf(doc, { inv, rows, s, qrBuffer, cyber: req.session.user.role === 'cyber' });
     doc.end();
   } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
 });
@@ -963,7 +964,7 @@ function pdfTable(doc, { x, y, colsRight, cols, dataRows, zebra }) {
 }
 function money(n, cur) { return `${cur || 'KWD'} ${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 
-function renderQuotePdf(doc, { qt, rows, s }) {
+function renderQuotePdf(doc, { qt, rows, s, cyber }) {
   const NAVY = '#0a3258', SOFT = '#666666', FAINT = '#999999';
   const pageW = doc.page.width, marginX = 40;
   const metaRows = [['QUOTE #:', qt.num], ['DATE:', fmtDatePdf(qt.date)]];
@@ -982,16 +983,17 @@ function renderQuotePdf(doc, { qt, rows, s }) {
   doc.font('Helvetica').fontSize(9).fillColor(SOFT).text(billLines, marginX + colW + 30, y + 15, { width: colW, lineGap: 3 });
   y = Math.max(doc.y, y + 60) + 18;
 
+  const airlineLabel = cyber ? 'CATEGORY' : (rows.some(r => r.airline === 'Hotel') ? 'HOTEL' : 'AIRLINE');
   const cols = [
     { label: 'PNR #', w: 65, bold: true, color: NAVY },
     { label: 'DESTINATION', w: 95 },
     { label: 'PASSENGER', w: 140 },
-    { label: 'AIRLINE', w: 70 },
+    { label: airlineLabel, w: 70 },
     { label: 'DATE', w: 75 },
     { label: 'PRICE', w: 0, align: 'right', bold: true },
   ];
   cols[cols.length - 1].w = (pageW - marginX * 2) - cols.slice(0, -1).reduce((a, c) => a + c.w, 0);
-  const dataRows = rows.map(r => [r.pnr, r.destination, r.passenger, r.airline, fmtDatePdf(r.travel_date), money(r.price, qt.currency)]);
+  const dataRows = rows.map(r => [r.pnr, r.destination, r.passenger, r.airlineRef, fmtDatePdf(r.travel_date), money(r.price, qt.currency)]);
   y = pdfTable(doc, { x: marginX, y, colsRight: pageW - marginX, cols, dataRows });
 
   y += 14;
@@ -1090,7 +1092,7 @@ app.get('/api/quotes/:id/pdf', auth, async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${qt.num}.pdf"`);
     const doc = new PDFDocument({ size: 'A4', margin: 0 });
     doc.pipe(res);
-    renderQuotePdf(doc, { qt, rows, s });
+    renderQuotePdf(doc, { qt, rows, s, cyber: req.session.user.role === 'cyber' });
     doc.end();
   } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
 });
