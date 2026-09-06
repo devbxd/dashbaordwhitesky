@@ -2339,21 +2339,21 @@ app.get('/api/upcoming', auth, async (req, res) => {
     {
       const { sql, params } = scopeCond();
       const rows = await query(
-        `SELECT client_name, passport_expiry FROM client_passports WHERE passport_expiry IS NOT NULL AND passport_expiry<>'' AND passport_expiry<=? AND (${sql}) ORDER BY passport_expiry ASC LIMIT 15`,
+        `SELECT client_name, passport_expiry FROM client_passports WHERE passport_expiry IS NOT NULL AND passport_expiry::text<>'' AND passport_expiry<=? AND (${sql}) ORDER BY passport_expiry ASC LIMIT 15`,
         [horizon, ...params]);
       for (const r of rows) items.push({ type: 'passport', icon: 'ti-file-certificate', title: r.client_name, sub: 'Passport expiring', date: r.passport_expiry });
     }
     {
       const { sql, params } = scopeCond();
       const rows = await query(
-        `SELECT passenger, country, appointment_date FROM visas WHERE appointment_date IS NOT NULL AND appointment_date<>'' AND appointment_date<=? AND (${sql}) ORDER BY appointment_date ASC LIMIT 15`,
+        `SELECT passenger, country, appointment_date FROM visas WHERE appointment_date IS NOT NULL AND appointment_date::text<>'' AND appointment_date<=? AND (${sql}) ORDER BY appointment_date ASC LIMIT 15`,
         [horizon, ...params]);
       for (const r of rows) items.push({ type: 'visa', icon: 'ti-id', title: r.passenger || 'Visa application', sub: `Appointment${r.country ? ' — ' + r.country : ''}`, date: r.appointment_date });
     }
     {
       const { sql, params } = scopeCond();
       const rows = await query(
-        `SELECT num, client_name, due_date FROM invoices WHERE due_date IS NOT NULL AND due_date<>'' AND due_date<=? AND status IN ('pending','partial') AND (${sql}) ORDER BY due_date ASC LIMIT 15`,
+        `SELECT num, client_name, due_date FROM invoices WHERE due_date IS NOT NULL AND due_date::text<>'' AND due_date<=? AND status IN ('pending','partial') AND (${sql}) ORDER BY due_date ASC LIMIT 15`,
         [horizon, ...params]);
       for (const r of rows) items.push({ type: 'invoice', icon: 'ti-file-invoice', title: `${r.num} — ${r.client_name}`, sub: 'Payment due', date: r.due_date });
     }
