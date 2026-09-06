@@ -217,10 +217,13 @@ function dl(){
 }
 
 /* AUTH */
-/* Login screen branding — this device remembers the last account that signed in here
-   (localStorage, per install/browser) so a white-labeled desktop build shows the
-   client's own name and logo instead of a hardcoded company, from the second launch on. */
+/* Login screen branding — only for the resold desktop build (?client=desktop): that
+   device remembers the last account that signed in on it (localStorage, per install) so
+   it shows that client's own name/logo instead of the default, from the second launch on.
+   The plain shared web URL never does this — it always shows the M&S Cyber Systems login
+   screen baked into index.html, regardless of who last logged in on that browser. */
 function applyLoginBrandingFromCache(){
+  if(!signupAllowedHere())return;
   try{
     const name=localStorage.getItem('brand_name');
     const logo=localStorage.getItem('brand_logo');
@@ -229,6 +232,7 @@ function applyLoginBrandingFromCache(){
   }catch(e){}
 }
 function cacheLoginBranding(){
+  if(!signupAllowedHere())return;
   try{
     localStorage.setItem('brand_name',settings.company_name||currentUser.display_name||'');
     if(settings.company_logo)localStorage.setItem('brand_logo',settings.company_logo);
