@@ -737,7 +737,7 @@ app.get('/api/clients', auth, async (req, res) => {
       return res.json(await query('SELECT * FROM clients WHERE owner_id=? ORDER BY name', [req.session.user.id]));
     }
     let clientsQ = 'SELECT * FROM clients WHERE 1=1';
-    if (req.session.user.role === 'patron') clientsQ += PATRON_EXCLUDE_ISOLATED;
+    if (req.session.user.role === 'patron' || req.session.user.role === 'employe') clientsQ += PATRON_EXCLUDE_ISOLATED;
     res.json(await query(clientsQ + ' ORDER BY name'));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -756,7 +756,7 @@ app.put('/api/clients/:id', auth, async (req, res) => {
     {
       const c = await queryOne('SELECT owner_id FROM clients WHERE id=?', [req.params.id]);
       if (isIsolated(req.session.user.role) && (!c || c.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
-      if (req.session.user.role === 'patron' && c && await isOwnedByIsolatedUser(c.owner_id)) return res.status(403).json({ error: 'Access denied' });
+      if ((req.session.user.role === 'patron' || req.session.user.role === 'employe') && c && await isOwnedByIsolatedUser(c.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     const { name, email, phone, fax, address, city, tag, notes } = req.body;
     await run('UPDATE clients SET name=?,email=?,phone=?,fax=?,address=?,city=?,tag=?,notes=? WHERE id=?',
@@ -769,7 +769,7 @@ app.delete('/api/clients/:id', auth, async (req, res) => {
     {
       const c = await queryOne('SELECT owner_id FROM clients WHERE id=?', [req.params.id]);
       if (isIsolated(req.session.user.role) && (!c || c.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
-      if (req.session.user.role === 'patron' && c && await isOwnedByIsolatedUser(c.owner_id)) return res.status(403).json({ error: 'Access denied' });
+      if ((req.session.user.role === 'patron' || req.session.user.role === 'employe') && c && await isOwnedByIsolatedUser(c.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('DELETE FROM clients WHERE id=?', [req.params.id]); res.json({ success: true });
   }
@@ -1502,7 +1502,7 @@ app.get('/api/items', auth, async (req, res) => {
   try {
     if (isIsolated(req.session.user.role)) return res.json(await query('SELECT * FROM items WHERE owner_id=? ORDER BY name', [req.session.user.id]));
     let itemsQ = 'SELECT * FROM items WHERE 1=1';
-    if (req.session.user.role === 'patron') itemsQ += PATRON_EXCLUDE_ISOLATED;
+    if (req.session.user.role === 'patron' || req.session.user.role === 'employe') itemsQ += PATRON_EXCLUDE_ISOLATED;
     res.json(await query(itemsQ + ' ORDER BY name'));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1521,7 +1521,7 @@ app.put('/api/items/:id', auth, async (req, res) => {
     {
       const it = await queryOne('SELECT owner_id FROM items WHERE id=?', [req.params.id]);
       if (isIsolated(req.session.user.role) && (!it || it.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
-      if (req.session.user.role === 'patron' && it && await isOwnedByIsolatedUser(it.owner_id)) return res.status(403).json({ error: 'Access denied' });
+      if ((req.session.user.role === 'patron' || req.session.user.role === 'employe') && it && await isOwnedByIsolatedUser(it.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     const { name, category, price, currency } = req.body;
     await run('UPDATE items SET name=?,category=?,price=?,currency=? WHERE id=?', [name, category || '', parseFloat(price) || 0, currency || 'KWD', req.params.id]);
@@ -1533,7 +1533,7 @@ app.delete('/api/items/:id', auth, async (req, res) => {
     {
       const it = await queryOne('SELECT owner_id FROM items WHERE id=?', [req.params.id]);
       if (isIsolated(req.session.user.role) && (!it || it.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
-      if (req.session.user.role === 'patron' && it && await isOwnedByIsolatedUser(it.owner_id)) return res.status(403).json({ error: 'Access denied' });
+      if ((req.session.user.role === 'patron' || req.session.user.role === 'employe') && it && await isOwnedByIsolatedUser(it.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
     await run('DELETE FROM items WHERE id=?', [req.params.id]);
     res.json({ success: true });
