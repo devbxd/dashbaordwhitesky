@@ -89,7 +89,7 @@ function cacheOfflineData(key,data){try{localStorage.setItem('cache_'+key,JSON.s
 function getCachedOfflineData(key){try{return JSON.parse(localStorage.getItem('cache_'+key)||'null');}catch(e){return null;}}
 async function fetchWithOfflineCache(key,url){
   try{const data=await api('GET',url);cacheOfflineData(key,data);return data;}
-  catch(e){const cached=getCachedOfflineData(key);if(cached)return cached;throw e;}
+  catch(e){return getCachedOfflineData(key)||[];}
 }
 
 /* ─── LANGUAGE (FR/EN/AR) ───────────────────────────────────────────────
