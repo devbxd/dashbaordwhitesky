@@ -2,6 +2,96 @@ let currentUser=null,settings={},allClients=[],allInvoices=[],allQuotes=[],allPa
 let allHotels=[],allVisas=[],allGroups=[],_editHotelId=null,_editVisaId=null,_editGroupId=null,editGroupTravelers=[];
 let allPassports=[],_editPassportId=null,_editVisaFile=null,_editPassportFile=null;
 
+/* ─── OFFLINE SUPPORT ────────────────────────────────────────────────────
+   A brand-new invoice made while offline is queued on the device (IndexedDB)
+   instead of failing - it has no invoice number yet on purpose. A real
+   sequential number (per-client or global) can only be assigned safely by the
+   server at the exact moment it's inserted - that's what stops two people
+   offline at the same time from ending up with the same number. The queued
+   invoice syncs itself the instant the connection returns, through the exact
+   same endpoint and numbering logic as a normal online save, so it comes back
+   with its real, final, non-duplicate number. Editing an existing invoice
+   still needs a connection - only creating a new one works offline. */
+const OFFLINE_DB_NAME='mscOfflineQueue', OFFLINE_STORE='pendingInvoices';
+function openOfflineDB(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(OFFLINE_DB_NAME,1);
+    req.onupgradeneeded=()=>{ if(!req.result.objectStoreNames.contains(OFFLINE_STORE)) req.result.createObjectStore(OFFLINE_STORE,{keyPath:'localId'}); };
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function queueOfflineInvoice(body){
+  const db=await openOfflineDB();
+  const localId='local-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction(OFFLINE_STORE,'readwrite');
+    tx.objectStore(OFFLINE_STORE).add({localId,body,createdAt:Date.now()});
+    tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error);
+  });
+  return localId;
+}
+async function getOfflineInvoices(){
+  const db=await openOfflineDB();
+  return new Promise((resolve,reject)=>{
+    const req=db.transaction(OFFLINE_STORE,'readonly').objectStore(OFFLINE_STORE).getAll();
+    req.onsuccess=()=>resolve(req.result.sort((a,b)=>a.createdAt-b.createdAt));
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function removeOfflineInvoice(localId){
+  const db=await openOfflineDB();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(OFFLINE_STORE,'readwrite');
+    tx.objectStore(OFFLINE_STORE).delete(localId);
+    tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error);
+  });
+}
+async function deleteOfflineInvoiceById(localId){await removeOfflineInvoice(localId);showPage('invoices');}
+let _syncingOffline=false;
+async function syncOfflineInvoices(){
+  if(_syncingOffline||!navigator.onLine)return;
+  _syncingOffline=true;
+  try{
+    const pending=await getOfflineInvoices();
+    if(!pending.length)return;
+    let synced=0;
+    for(const rec of pending){
+      try{
+        const r=await api('POST','/api/invoices',rec.body);
+        if(r&&r.error)continue;
+        await removeOfflineInvoice(rec.localId);
+        synced++;
+      }catch(e){ break; }
+    }
+    if(synced>0){
+      toast(`✅ ${synced} offline invoice(s) synced`,'success');
+      const active=document.querySelector('.nav-item.active')?.dataset.page;
+      if(active==='invoices'||active==='dashboard')showPage(active);
+    }
+  } finally { _syncingOffline=false; }
+}
+function updateConnStatus(){
+  const online=navigator.onLine;
+  const el=document.getElementById('conn-status');
+  if(el){
+    el.className=online?'ti ti-wifi conn-badge conn-online':'ti ti-wifi-off conn-badge conn-offline';
+    el.title=online?'Online':'Offline — new invoices are saved on this device and sent automatically once you\'re back online';
+  }
+  if(online)syncOfflineInvoices();
+}
+window.addEventListener('online',updateConnStatus);
+window.addEventListener('offline',updateConnStatus);
+if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}
+// Lets the New Invoice screen still work offline (client dropdown, catalog) by keeping
+// the last successful copy around - falls back to it only when the live request fails.
+function cacheOfflineData(key,data){try{localStorage.setItem('cache_'+key,JSON.stringify(data));}catch(e){}}
+function getCachedOfflineData(key){try{return JSON.parse(localStorage.getItem('cache_'+key)||'null');}catch(e){return null;}}
+async function fetchWithOfflineCache(key,url){
+  try{const data=await api('GET',url);cacheOfflineData(key,data);return data;}
+  catch(e){const cached=getCachedOfflineData(key);if(cached)return cached;throw e;}
+}
+
 /* ─── LANGUAGE (FR/EN/AR) ───────────────────────────────────────────────
    No external service, no Google — a local dictionary swapped into the DOM after
    every render. Works offline, works identically in the desktop app (same page). */
@@ -294,7 +384,7 @@ function playWelcome(name,cyber){
   });
 }
 document.getElementById('btn-logout').addEventListener('click',async()=>{await api('POST','/api/logout');currentUser=null;document.getElementById('app-screen').classList.add('hidden');document.getElementById('login-screen').style.display='flex';document.getElementById('login-pass').value='';});
-function showApp(){document.getElementById('login-screen').style.display='none';document.getElementById('app-screen').classList.remove('hidden');document.getElementById('user-avatar').textContent=initials(currentUser.display_name);document.getElementById('user-name-display').textContent=currentUser.display_name;const roleLabels={patron:'Owner',employe:'Staff',demo:'User',cyber:'Owner',client:'Owner'};document.getElementById('user-role-display').textContent=roleLabels[currentUser.role]||'Staff';applyBranding();}
+function showApp(){document.getElementById('login-screen').style.display='none';document.getElementById('app-screen').classList.remove('hidden');document.getElementById('user-avatar').textContent=initials(currentUser.display_name);document.getElementById('user-name-display').textContent=currentUser.display_name;const roleLabels={patron:'Owner',employe:'Staff',demo:'User',cyber:'Owner',client:'Owner'};document.getElementById('user-role-display').textContent=roleLabels[currentUser.role]||'Staff';applyBranding();updateConnStatus();}
 function applyBranding(){
   const cyber=isCyber();
   const client=isClient();
@@ -393,11 +483,20 @@ document.getElementById('btn-save-item').addEventListener('click',async()=>{cons
 async function deleteItem(id){if(!await confirmDialog('Delete this item from the catalog?'))return;await api('DELETE',`/api/items/${id}`);toast('Item deleted');showPage('catalog');}
 
 /* INVOICES LIST */
-async function pageInvoices(mc){allInvoices=await api('GET','/api/invoices');mc.innerHTML=`
-<div class="page-header"><div><div class="page-title">Invoices</div><div class="page-sub">${allInvoices.length} invoice(s)${currentUser.role==='employe'?' — your invoices only':''}</div></div><div class="header-actions"><button class="btn-new" onclick="showPage('new-invoice')"><i class="ti ti-plus"></i> New Invoice</button>${dl().importPdf?`<button class="btn-secondary" onclick="openPdfImport()"><i class="ti ti-file-import"></i> Import PDF</button>`:''}</div></div>
+async function pageInvoices(mc){
+  let pending=[];try{pending=await getOfflineInvoices();}catch(e){}
+  try{allInvoices=await api('GET','/api/invoices');}catch(e){allInvoices=[];}
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">Invoices</div><div class="page-sub">${allInvoices.length} invoice(s)${pending.length?` — ${pending.length} pending sync`:''}${currentUser.role==='employe'?' — your invoices only':''}</div></div><div class="header-actions"><button class="btn-new" onclick="showPage('new-invoice')"><i class="ti ti-plus"></i> New Invoice</button>${dl().importPdf?`<button class="btn-secondary" onclick="openPdfImport()"><i class="ti ti-file-import"></i> Import PDF</button>`:''}</div></div>
+${!navigator.onLine?`<div class="info-box"><i class="ti ti-cloud-off"></i> You're offline — showing what's saved on this device. New invoices sync automatically once you're back online.</div>`:''}
 ${currentUser.role==='employe'?`<div class="info-box"><i class="ti ti-info-circle"></i> You can only see your own invoices.</div>`:''}
 <div class="filter-bar"><input type="text" placeholder="Client, number…" id="inv-q" oninput="filterInv()"/><select id="inv-s" onchange="filterInv()"><option value="">All statuses</option><option value="draft">Draft</option><option value="pending">Pending</option><option value="paid">Paid</option><option value="overdue">Overdue</option></select><input type="date" id="inv-from" onchange="filterInv()"/><input type="date" id="inv-to" onchange="filterInv()"/></div>
-<div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Due</th><th>Total</th><th>Status</th><th>Created by</th><th>Actions</th></tr></thead><tbody id="inv-tbody">${invRowsHtml(allInvoices)}</tbody></table></div></div>`;}
+<div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Date</th><th>Due</th><th>Total</th><th>Status</th><th>Created by</th><th>Actions</th></tr></thead><tbody id="inv-tbody">${pending.map(pendingInvRowHtml).join('')}${(allInvoices.length===0&&pending.length>0)?'':invRowsHtml(allInvoices)}</tbody></table></div></div>`;}
+function pendingInvRowHtml(rec){
+  const b=rec.body;
+  const total=(b.rows||[]).reduce((a,r)=>a+(parseFloat(r.price)||0),0)+(parseFloat(b.tax)||0)-(parseFloat(b.deposit)||0);
+  return `<tr style="background:#fffaf0"><td style="font-weight:700;color:#a05c00"><i class="ti ti-cloud-off" style="vertical-align:-2px;margin-right:4px"></i>Pending sync</td><td>${b.client_name||'—'}</td><td>${fmtDate(b.date)}</td><td>${fmtDate(b.due_date)}</td><td style="font-weight:700">${fmt(total,b.currency)}</td><td><span style="background:#fff4e0;color:#a05c00;font-size:11px;font-weight:700;padding:3px 8px;border-radius:5px;border:1px solid #f0c674">Not synced yet</span></td><td style="color:#aaa;font-size:12px">You (offline)</td><td class="actions-cell"><button class="action-btn danger" onclick="deleteOfflineInvoiceById('${rec.localId}')"><i class="ti ti-trash"></i> Delete</button></td></tr>`;
+}
 function invRowsHtml(list){if(!list.length)return`<tr><td colspan="8"><div class="empty-state"><i class="ti ti-file-off"></i><h3>No invoices</h3></div></td></tr>`;return list.map(i=>`<tr><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="viewInvoice(${i.id})">${i.num}</td><td>${i.client_name}</td><td>${fmtDate(i.date)}</td><td>${fmtDate(i.due_date)}</td><td style="font-weight:700">${fmt(i.total,i.currency)}</td><td>${statusBadge(i.status)}</td><td style="color:#aaa;font-size:12px">${i.owner_name||'—'}</td><td class="actions-cell"><button class="action-btn danger" onclick="deleteInvoice(${i.id})"><i class="ti ti-trash"></i> Delete</button></td></tr>`).join('');}
 function filterInv(){const q=document.getElementById('inv-q')?.value||'';const s=document.getElementById('inv-s')?.value||'';const from=document.getElementById('inv-from')?.value||'';const to=document.getElementById('inv-to')?.value||'';const f=allInvoices.filter(i=>(!q||i.num.toLowerCase().includes(q.toLowerCase())||i.client_name.toLowerCase().includes(q.toLowerCase()))&&(!s||i.status===s)&&(!from||i.date>=from)&&(!to||i.date<=to));const tb=document.getElementById('inv-tbody');if(tb)tb.innerHTML=invRowsHtml(f);}
 
@@ -543,11 +642,11 @@ document.getElementById('btn-send-email').addEventListener('click',async()=>{
 
 
 async function fillClient(sel){const o=sel.querySelector(`option[value="${sel.value}"]`);if(o&&sel.value){[['inv-client-name','name'],['inv-client-addr','addr'],['inv-client-phone','phone'],['inv-client-fax','fax']].forEach(([id,k])=>{const el=document.getElementById(id);if(el)el.value=o.dataset[k]||'';});}await refreshInvNumPreview(sel.value);}
-async function refreshInvNumPreview(clientId){if(_editInvId)return;const el=document.getElementById('inv-num');if(!el)return;const{num}=await api('GET',`/api/invoices/next-num${clientId?`?client_id=${clientId}`:''}`);el.value=num;}
+async function refreshInvNumPreview(clientId){if(_editInvId)return;const el=document.getElementById('inv-num');if(!el)return;if(!navigator.onLine){el.value='—';return;}try{const{num}=await api('GET',`/api/invoices/next-num${clientId?`?client_id=${clientId}`:''}`);el.value=num;}catch(e){el.value='—';}}
 function setAllAirlineType(val){editInvRows.forEach(r=>r.airline=val);renderInvRows();setTimeout(()=>{const sel=document.getElementById('col-airline-type');if(sel)sel.value=val;},10);}
 
 /* NEW/EDIT INVOICE */
-async function pageNewInvoice(mc){_editInvId=null;editInvRows=[{pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0}];[allClients,allItems]=await Promise.all([api('GET','/api/clients'),api('GET','/api/items')]);const{num}=await api('GET','/api/invoices/next-num');renderInvForm(mc,{num,date:today(),due_date:addDays(today(),parseInt(settings.invoice_due_days)||7),status:'pending',currency:settings.invoice_currency||'KWD',tax:0,deposit:0,due_days:settings.invoice_due_days||7});}
+async function pageNewInvoice(mc){_editInvId=null;editInvRows=[{pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0}];[allClients,allItems]=await Promise.all([fetchWithOfflineCache('clients','/api/clients'),fetchWithOfflineCache('items','/api/items')]);let num='—';if(navigator.onLine){try{({num}=await api('GET','/api/invoices/next-num'));}catch(e){num='—';}}renderInvForm(mc,{num,date:today(),due_date:addDays(today(),parseInt(settings.invoice_due_days)||7),status:'pending',currency:settings.invoice_currency||'KWD',tax:0,deposit:0,due_days:settings.invoice_due_days||7});}
 async function editInvoice(id){_editInvId=id;const inv=await api('GET',`/api/invoices/${id}`);editInvRows=inv.rows&&inv.rows.length?inv.rows.map(r=>({...r,airlineRef:r.airlineRef||''})):[{pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:'',travel_date:'',price:0}];[allClients,allItems]=await Promise.all([api('GET','/api/clients'),api('GET','/api/items')]);const mc=document.getElementById('main-content');document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));renderInvForm(mc,inv);}
 function newInvoiceFor(cid,cname,caddr,cphone,cfax){showPage('new-invoice');setTimeout(()=>{const sel=document.getElementById('inv-client');if(sel)sel.value=cid;[['inv-client-name',cname],['inv-client-addr',caddr],['inv-client-phone',cphone],['inv-client-fax',cfax]].forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.value=v||'';});refreshInvNumPreview(cid);},150);}
 
@@ -557,7 +656,7 @@ function renderInvForm(mc,inv){
   mc.innerHTML=`
 <div class="page-header"><div><div class="page-title">${_editInvId?'Edit Invoice':'New Invoice'}</div></div><button class="btn-secondary" onclick="showPage('invoices')"><i class="ti ti-arrow-left"></i> Cancel</button></div>
 <div class="card"><div class="card-header"><span class="card-title">Information</span></div><div class="form-grid2" style="gap:14px">
-  <div class="form-group"><label class="form-label">Invoice #</label><input class="form-input" id="inv-num" value="${inv.num||''}" ${_editInvId?'readonly style="background:#f5f5f5"':''}/></div>
+  <div class="form-group"><label class="form-label">Invoice #</label><input class="form-input" id="inv-num" value="${inv.num||''}" placeholder="${!_editInvId&&!navigator.onLine?'Assigned once synced':''}" ${(_editInvId||(!navigator.onLine&&!_editInvId))?'readonly style="background:#f5f5f5"':''}/></div>
   <div class="form-group"><label class="form-label">Currency</label><select class="form-input" id="inv-currency">${currencies.map(c=>`<option ${(inv.currency||'KWD')===c?'selected':''}>${c}</option>`).join('')}</select></div>
   ${isCyber()?`
   <div class="form-group"><label class="form-label">Delivery Date</label><input type="date" class="form-input" id="inv-date" value="${inv.date||today()}" oninput="document.getElementById('inv-due').value=addDays(this.value,parseInt(document.getElementById('inv-due-days').value)||0)"/></div>
@@ -602,7 +701,19 @@ function addInvRow(){editInvRows.push({pnr:'',destination:'',passenger:'',airlin
 function addRowFromCatalog(rowsArr,renderFn,itemId){if(!itemId)return;const it=allItems.find(x=>x.id==itemId);if(!it)return;rowsArr.push({pnr:'',destination:'',passenger:'',airline:'Airline',airlineRef:it.name,travel_date:'',price:it.price});renderFn();}
 function removeInvRow(i){if(editInvRows.length===1){toast('At least one row required');return;}editInvRows.splice(i,1);renderInvRows();}
 function calcInvTotal(){const sub=editInvRows.reduce((a,r)=>a+(parseFloat(r.price)||0),0);const tax=parseFloat(document.getElementById('inv-tax')?.value)||0;const dep=parseFloat(document.getElementById('inv-deposit')?.value)||0;const cur=document.getElementById('inv-currency')?.value||'KWD';const s=document.getElementById('inv-subtotal');if(s)s.textContent=cur+' '+sub.toFixed(2);const t=document.getElementById('inv-total');if(t)t.textContent=cur+' '+(sub+tax-dep).toFixed(2);}
-async function saveInv(forceStatus){const cname=document.getElementById('inv-client-name')?.value.trim();if(!cname){toast('Client name is required','error');return;}const status=forceStatus||document.getElementById('inv-status')?.value||'pending';const body={num:document.getElementById('inv-num')?.value.trim(),client_id:document.getElementById('inv-client')?.value||null,client_name:cname,client_address:document.getElementById('inv-client-addr')?.value.trim(),client_phone:document.getElementById('inv-client-phone')?.value.trim(),client_fax:document.getElementById('inv-client-fax')?.value.trim(),status,date:document.getElementById('inv-date')?.value,due_date:document.getElementById('inv-due')?.value,due_days:document.getElementById('inv-due-days')?.value||7,currency:document.getElementById('inv-currency')?.value||'KWD',tax:document.getElementById('inv-tax')?.value||0,deposit:document.getElementById('inv-deposit')?.value||0,notes:document.getElementById('inv-notes')?.value.trim(),rows:editInvRows};let r;if(_editInvId){r=await api('PUT',`/api/invoices/${_editInvId}`,body);toast('✅ Invoice updated','success');}else{r=await api('POST','/api/invoices',body);toast('✅ Invoice created','success');}if(r&&r.error){toast(r.error,'error');return;}if(_editInvId)viewInvoice(_editInvId);else showPage('invoices');}
+async function saveInv(forceStatus){const cname=document.getElementById('inv-client-name')?.value.trim();if(!cname){toast('Client name is required','error');return;}const status=forceStatus||document.getElementById('inv-status')?.value||'pending';const body={num:document.getElementById('inv-num')?.value.trim(),client_id:document.getElementById('inv-client')?.value||null,client_name:cname,client_address:document.getElementById('inv-client-addr')?.value.trim(),client_phone:document.getElementById('inv-client-phone')?.value.trim(),client_fax:document.getElementById('inv-client-fax')?.value.trim(),status,date:document.getElementById('inv-date')?.value,due_date:document.getElementById('inv-due')?.value,due_days:document.getElementById('inv-due-days')?.value||7,currency:document.getElementById('inv-currency')?.value||'KWD',tax:document.getElementById('inv-tax')?.value||0,deposit:document.getElementById('inv-deposit')?.value||0,notes:document.getElementById('inv-notes')?.value.trim(),rows:editInvRows};
+  if(_editInvId&&!navigator.onLine){toast('You are offline — editing an existing invoice needs a connection. New invoices can still be saved offline.','error');return;}
+  let r;
+  if(_editInvId){r=await api('PUT',`/api/invoices/${_editInvId}`,body);toast('✅ Invoice updated','success');}
+  else{
+    if(!navigator.onLine){await queueOfflineInvoice(body);toast('📴 Saved offline — it will be sent automatically once you\'re back online','success');showPage('invoices');return;}
+    try{r=await api('POST','/api/invoices',body);}
+    catch(e){await queueOfflineInvoice(body);toast('📴 Saved offline — it will be sent automatically once you\'re back online','success');showPage('invoices');return;}
+    toast('✅ Invoice created','success');
+  }
+  if(r&&r.error){toast(r.error,'error');return;}
+  if(_editInvId)viewInvoice(_editInvId);else showPage('invoices');
+}
 
 /* QUOTES */
 async function pageQuotes(mc){allQuotes=await api('GET','/api/quotes');mc.innerHTML=`

@@ -138,6 +138,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .brand-icon i{color:#fff;font-size:17px}
 .brand-name{font-size:13px;font-weight:800;color:#fff;letter-spacing:-.01em}
 .brand-sub{font-size:10.5px;color:rgba(255,255,255,.45);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.conn-badge{margin-left:auto;font-size:15px;flex-shrink:0;cursor:default}
+.conn-badge.conn-online{color:#3fbe7e}
+.conn-badge.conn-offline{color:rgba(255,255,255,.35)}
 .nav-section{padding:.5rem .55rem;flex:1}
 .nav-sep{font-size:10px;color:rgba(255,255,255,.32);padding:10px 10px 4px;text-transform:uppercase;letter-spacing:.09em;margin-top:4px;font-weight:700}
 .nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:13px;color:rgba(255,255,255,.68);transition:background .15s,color .15s;margin-bottom:1px;user-select:none;position:relative}
