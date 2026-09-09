@@ -92,36 +92,24 @@ const NUM_PREFIX = {
 // before the real insert and retries a few times on a collision instead of surfacing that
 // as an error, so a race never loses someone's typed invoice.
 const NUM_RESOURCE = {
-  invoices: { table: 'invoices', key: 'inv', default: 'FAC-' },
+  invoices: { table: 'invoices', key: 'inv', default: 'INV-' },
   quotes: { table: 'quotes', key: 'qte', default: 'QTE-' },
 };
-// A saved company (client_id set from the dropdown, as opposed to a walk-in typed by hand)
-// gets its own invoice number sequence, stable regardless of what other invoices happen
-// in between - e.g. client "Boudy Corp" always sees BOUDY-001, BOUDY-002, BOUDY-003... The
-// prefix is derived from the client's name once and cached on the row so it never shifts
-// under them even if the name is edited later.
-const RESERVED_CLIENT_PREFIXES = new Set(['FAC', 'QTE', 'MSC', 'DEMO', 'INV', 'TKT', 'CN', 'HTL', 'VISA', 'GRP', 'CLIENT']);
-async function getClientInvoicePrefix(client) {
-  if (client.invoice_prefix) return client.invoice_prefix;
-  let base = (client.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
-  if (!base) base = 'CLIENT' + client.id;
-  if (RESERVED_CLIENT_PREFIXES.has(base)) base = base + client.id;
-  const clash = await queryOne('SELECT id FROM clients WHERE invoice_prefix=? AND id<>?', [base, client.id]);
-  if (clash) base = base + client.id;
-  await run('UPDATE clients SET invoice_prefix=? WHERE id=?', [base, client.id]);
-  return base;
-}
+// A saved company (client_id set from the dropdown) gets its own invoice sequence - plain
+// digits, no name/prefix shown - that keeps counting up no matter what other invoices (other
+// companies or walk-ins) happen in between. A walk-in (no client_id) shares one separate
+// "INV-001, INV-002, ..." sequence with other walk-ins only.
 async function computeNextNum(resourceKey, user, clientId) {
   const cfg = NUM_RESOURCE[resourceKey];
   if (resourceKey === 'invoices' && clientId) {
-    const client = await queryOne('SELECT * FROM clients WHERE id=?', [clientId]);
-    if (client) {
-      const prefix = await getClientInvoicePrefix(client);
-      const last = await queryOne('SELECT num FROM invoices WHERE client_id=? ORDER BY id DESC LIMIT 1', [clientId]);
-      if (!last) return prefix + '-001';
-      const m = last.num.match(/(\d+)$/);
-      return prefix + '-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
-    }
+    const last = await queryOne('SELECT num FROM invoices WHERE client_id=? ORDER BY id DESC LIMIT 1', [clientId]);
+    const m = last && last.num.match(/(\d+)$/);
+    let n = m ? parseInt(m[1], 10) + 1 : 1;
+    let num = String(n).padStart(3, '0');
+    // Two different companies both landing on plain "011" would collide (no prefix to tell
+    // them apart) - walk forward to the next free number instead of failing the insert.
+    while (await queryOne('SELECT id FROM invoices WHERE num=?', [num])) { n++; num = String(n).padStart(3, '0'); }
+    return num;
   }
   if (isIsolated(user.role)) {
     const prefix = (NUM_PREFIX[user.role] || NUM_PREFIX.demo)[cfg.key];
@@ -130,7 +118,8 @@ async function computeNextNum(resourceKey, user, clientId) {
     const m = last.num.match(/(\d+)$/);
     return prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
   }
-  const last = await queryOne(`SELECT num FROM ${cfg.table} ORDER BY id DESC LIMIT 1`);
+  const walkinFilter = resourceKey === 'invoices' ? 'WHERE client_id IS NULL' : '';
+  const last = await queryOne(`SELECT num FROM ${cfg.table} ${walkinFilter} ORDER BY id DESC LIMIT 1`);
   if (!last) return cfg.default + '001';
   const m = last.num.match(/(\d+)$/);
   return cfg.default + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
@@ -452,24 +441,45 @@ async function initDB() {
   for (const inv of untokened) {
     await run('UPDATE invoices SET verify_token=? WHERE id=?', [crypto.randomBytes(12).toString('hex'), inv.id]);
   }
-  await pool.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS invoice_prefix TEXT`);
-  // One-time backfill for per-client invoice numbering: any saved company that already has
-  // invoices but no invoice_prefix yet is getting this feature for the first time, so its
-  // past invoices are renumbered in creation order (oldest first) into that company's own
-  // sequence. invoice_prefix being set is itself the "already migrated" marker, so this
-  // never re-runs on a client once it's been done.
-  const unprefixedClients = await query(`
-    SELECT DISTINCT c.id, c.name FROM clients c
-    JOIN invoices i ON i.client_id = c.id
-    WHERE c.invoice_prefix IS NULL
+  // One-time migration: saved companies used to show their name in the invoice number (e.g.
+  // "SADITA-001"); walk-ins used "FAC-001". Now a company's invoices are plain digits (own
+  // sequence, no name) and walk-ins share one "INV-001, INV-002, ..." sequence. Both halves
+  // are self-guarding: once migrated, company invoices are pure digits and walk-ins all start
+  // with "INV-", so neither WHERE clause matches anything on later boots.
+  const legacyGroupClients = await query(`
+    SELECT DISTINCT client_id FROM invoices
+    WHERE client_id IS NOT NULL AND num !~ '^[0-9]+$'
+      AND (owner_id IS NULL OR owner_id NOT IN (SELECT id FROM users WHERE role IN (${ISOLATED_ROLES_SQL})))
   `);
-  for (const c of unprefixedClients) {
-    const prefix = await getClientInvoicePrefix(c);
-    const clientInvoices = await query('SELECT id, num FROM invoices WHERE client_id=? ORDER BY created_at ASC, id ASC', [c.id]);
+  for (const { client_id } of legacyGroupClients) {
+    const clientInvoices = await query('SELECT id, num FROM invoices WHERE client_id=? ORDER BY created_at ASC, id ASC', [client_id]);
     let seq = 1;
     for (const inv of clientInvoices) {
-      const newNum = `${prefix}-${String(seq++).padStart(3, '0')}`;
+      let newNum = String(seq).padStart(3, '0');
+      while (await queryOne('SELECT id FROM invoices WHERE num=? AND id<>?', [newNum, inv.id])) { seq++; newNum = String(seq).padStart(3, '0'); }
+      seq++;
       if (newNum === inv.num) continue;
+      await run('UPDATE invoices SET num=? WHERE id=?', [newNum, inv.id]);
+      await run('UPDATE payments SET invoice_num=? WHERE invoice_id=?', [newNum, inv.id]);
+      await run('UPDATE credit_notes SET invoice_num=? WHERE invoice_id=?', [newNum, inv.id]);
+    }
+  }
+  const legacyWalkins = await queryOne(`
+    SELECT id FROM invoices
+    WHERE client_id IS NULL AND num NOT LIKE 'INV-%'
+      AND (owner_id IS NULL OR owner_id NOT IN (SELECT id FROM users WHERE role IN (${ISOLATED_ROLES_SQL})))
+    LIMIT 1
+  `);
+  if (legacyWalkins) {
+    const walkinInvoices = await query(`
+      SELECT id FROM invoices
+      WHERE client_id IS NULL
+        AND (owner_id IS NULL OR owner_id NOT IN (SELECT id FROM users WHERE role IN (${ISOLATED_ROLES_SQL})))
+      ORDER BY created_at ASC, id ASC
+    `);
+    let seq = 1;
+    for (const inv of walkinInvoices) {
+      const newNum = `INV-${String(seq++).padStart(3, '0')}`;
       await run('UPDATE invoices SET num=? WHERE id=?', [newNum, inv.id]);
       await run('UPDATE payments SET invoice_num=? WHERE invoice_id=?', [newNum, inv.id]);
       await run('UPDATE credit_notes SET invoice_num=? WHERE invoice_id=?', [newNum, inv.id]);
@@ -867,8 +877,10 @@ function renderInvoicePdf(doc, { inv, rows, s, qrBuffer, cyber }) {
   doc.font('Helvetica-Bold').fillColor('#1a1a2e').text(inv.num, rightColX + 95, y + 40, { width: 125, align: 'right' });
   doc.font('Helvetica-Bold').fillColor(FAINT).text('INVOICE DATE:', rightColX, y + 53, { width: 90, align: 'right' });
   doc.font('Helvetica-Bold').fillColor('#1a1a2e').text(fmtDatePdf(inv.date), rightColX + 95, y + 53, { width: 125, align: 'right' });
+  doc.font('Helvetica-Bold').fillColor(FAINT).text('PAYMENT TERMS:', rightColX, y + 66, { width: 90, align: 'right' });
+  doc.font('Helvetica-Bold').fillColor(NAVY).text(`Net ${inv.due_days || 7} Days`, rightColX + 95, y + 66, { width: 125, align: 'right' });
 
-  y += 86;
+  y += 99;
   doc.moveTo(marginX, y).lineTo(pageW - marginX, y).lineWidth(3).strokeColor(NAVY).stroke();
   y += 18;
 

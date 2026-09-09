@@ -1597,7 +1597,7 @@ function parsePdfText(text) {
 
     // Invoice number
     const numIdx = tokens.indexOf('#:');
-    const num = numIdx !== -1 ? 'FAC-' + tokens[numIdx + 1] : '';
+    const num = numIdx !== -1 ? 'INV-' + tokens[numIdx + 1] : '';
 
     // Date
     const dateIdx = tokens.findIndex(t => t === 'date:');
