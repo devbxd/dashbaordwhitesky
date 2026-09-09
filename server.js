@@ -877,8 +877,9 @@ function renderInvoicePdf(doc, { inv, rows, s, qrBuffer, cyber }) {
   doc.font('Helvetica-Bold').fillColor('#1a1a2e').text(inv.num, rightColX + 95, y + 40, { width: 125, align: 'right' });
   doc.font('Helvetica-Bold').fillColor(FAINT).text('INVOICE DATE:', rightColX, y + 53, { width: 90, align: 'right' });
   doc.font('Helvetica-Bold').fillColor('#1a1a2e').text(fmtDatePdf(inv.date), rightColX + 95, y + 53, { width: 125, align: 'right' });
+  const dueDate = inv.due_date || (inv.date ? new Date(new Date(inv.date).getTime() + (inv.due_days || 7) * 86400000).toISOString().split('T')[0] : null);
   doc.font('Helvetica-Bold').fillColor(FAINT).text('PAYMENT TERMS:', rightColX, y + 66, { width: 90, align: 'right' });
-  doc.font('Helvetica-Bold').fillColor(NAVY).text(`Net ${inv.due_days || 7} Days`, rightColX + 95, y + 66, { width: 125, align: 'right' });
+  doc.font('Helvetica-Bold').fillColor(NAVY).text(fmtDatePdf(dueDate), rightColX + 95, y + 66, { width: 125, align: 'right' });
 
   y += 99;
   doc.moveTo(marginX, y).lineTo(pageW - marginX, y).lineWidth(3).strokeColor(NAVY).stroke();
