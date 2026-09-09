@@ -437,6 +437,10 @@ async function initDB() {
   // QR-code authenticity check: each invoice gets a random, unguessable token (not the
   // sequential invoice number) so /verify/:token can't be walked to snoop on other clients.
   await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS verify_token TEXT`);
+  await pool.query(`
+    ALTER TABLE hotel_bookings ADD COLUMN IF NOT EXISTS hotel_address TEXT;
+    ALTER TABLE hotel_bookings ADD COLUMN IF NOT EXISTS hotel_phone TEXT;
+  `);
   const untokened = await query('SELECT id FROM invoices WHERE verify_token IS NULL');
   for (const inv of untokened) {
     await run('UPDATE invoices SET verify_token=? WHERE id=?', [crypto.randomBytes(12).toString('hex'), inv.id]);
@@ -1033,6 +1037,89 @@ function pdfTable(doc, { x, y, colsRight, cols, dataRows, zebra }) {
   return y;
 }
 function money(n, cur) { return `${cur || 'KWD'} ${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+
+// Hotel confirmation voucher - the printed slip a guest hands the hotel at check-in.
+// Layout follows a standard supplier voucher (logo/title/meta, hotel block, guest name,
+// check-in/out/nights, room type, boilerplate disclaimers, hotel stamp/signature line).
+function renderHotelVoucherPdf(doc, { h, s }) {
+  const NAVY = '#0a3258', SOFT = '#666666', FAINT = '#999999', LINE = '#e5eaf2';
+  const pageW = doc.page.width, marginX = 40;
+  const metaRows = [['BOOKING DATE:', fmtDatePdf(h.created_at)], ['BOOKING ID:', h.num], ['BOOKING REF:', h.confirmation_num || '—']];
+  let y = pdfLetterhead(doc, { title: 'VOUCHER', metaRows, s });
+
+  doc.font('Helvetica-Bold').fontSize(14).fillColor(NAVY).text(h.hotel_name || '—', marginX, y, { width: pageW - marginX * 2 });
+  y = doc.y + 4;
+  const addrLines = [h.hotel_address, h.destination, h.hotel_phone].filter(Boolean).join('\n');
+  if (addrLines) { doc.font('Helvetica').fontSize(9.5).fillColor(SOFT).text(addrLines, marginX, y, { width: pageW - marginX * 2, lineGap: 2 }); y = doc.y; }
+  y += 24;
+
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(FAINT).text('GUEST NAME', marginX, y);
+  doc.moveTo(marginX, y + 13).lineTo(marginX + 300, y + 13).lineWidth(1).strokeColor(NAVY).stroke();
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#1a1a2e').text(h.passenger || '—', marginX, y + 17);
+  y += 45;
+
+  const colW3 = (pageW - marginX * 2) / 3;
+  ['CHECK IN', 'CHECK OUT', 'NIGHTS'].forEach((lbl, i) => doc.font('Helvetica-Bold').fontSize(9).fillColor(FAINT).text(lbl, marginX + i * colW3, y, { width: colW3 }));
+  y += 13;
+  doc.moveTo(marginX, y).lineTo(pageW - marginX, y).lineWidth(1).strokeColor(NAVY).stroke();
+  y += 6;
+  const nights = (h.checkin_date && h.checkout_date) ? Math.max(0, Math.round((new Date(h.checkout_date) - new Date(h.checkin_date)) / 86400000)) : '—';
+  [fmtDatePdf(h.checkin_date), fmtDatePdf(h.checkout_date), String(nights)].forEach((v, i) => doc.font('Helvetica').fontSize(10.5).fillColor('#1a1a2e').text(v, marginX + i * colW3, y, { width: colW3 }));
+  y += 35;
+
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(FAINT).text('ROOM TYPE', marginX, y);
+  doc.moveTo(marginX, y + 13).lineTo(pageW - marginX, y + 13).lineWidth(1).strokeColor(NAVY).stroke();
+  doc.font('Helvetica').fontSize(10.5).fillColor('#1a1a2e').text(h.room_type || '—', marginX, y + 17);
+  y += 50;
+
+  doc.font('Helvetica-Bold').fontSize(9).fillColor('#a3242a').text('Remark: For any complaint during your hotel stay, please report immediately before you check out, else no complaints will be accepted.', marginX, y, { width: pageW - marginX * 2, lineGap: 2 });
+  y = doc.y + 18;
+
+  doc.rect(marginX, y, pageW - marginX * 2, 36).strokeColor(LINE).lineWidth(1).stroke();
+  doc.font('Helvetica').fontSize(9.5).fillColor('#333333').text(`If you cannot allocate this booking please call: ${s.company_phone_m || s.company_phone_p || ''}`, marginX + 10, y + 13);
+  y += 56;
+
+  doc.font('Helvetica-Bold').fontSize(8).fillColor('#333333').text('N.B: IN CASE YOU ARE ACCOMMODATED LESS OVERNIGHTS, PLEASE MAKE SURE THAT HOTELIER HAS PROPERLY SIGNED AND ACCEPTED THIS MODIFICATION. WE CONFIRM THE AMENDMENT AND WILL INVOICE AS FOLLOWS: NUMBER OF NIGHTS TO BE REFUNDED.', marginX, y, { width: pageW - marginX * 2, align: 'center', lineGap: 2 });
+  y = doc.y + 20;
+
+  doc.font('Helvetica-Bold').fontSize(9).fillColor('#333333').text('THE HOTEL (STAMP & SIGNATURE)', marginX, y, { width: pageW - marginX * 2, align: 'center' });
+}
+
+// Payment receipt - proof a specific payment (recorded via "Record Payment" on an invoice)
+// was received. Reuses the payment's own data, no separate entry needed.
+function renderReceiptPdf(doc, { pay, inv, s }) {
+  const NAVY = '#0a3258', SOFT = '#666666', FAINT = '#999999';
+  const pageW = doc.page.width, marginX = 40;
+  const metaRows = [['RECEIPT #:', `RCT-${String(pay.id).padStart(4, '0')}`], ['DATE:', fmtDatePdf(pay.date)]];
+  let y = pdfLetterhead(doc, { title: 'RECEIPT', metaRows, s });
+
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('RECEIVED FROM', marginX, y);
+  doc.font('Helvetica-Bold').fontSize(14).fillColor(NAVY).text(pay.client_name || inv.client_name || '—', marginX, y + 13);
+  y += 50;
+
+  doc.rect(marginX, y, pageW - marginX * 2, 56).fill('#f2f5fa');
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('AMOUNT RECEIVED', marginX + 16, y + 12);
+  doc.font('Helvetica-Bold').fontSize(22).fillColor(NAVY).text(money(pay.amount, inv.currency), marginX + 16, y + 26);
+  y += 76;
+
+  const colW = (pageW - marginX * 2 - 30) / 2;
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('PAYMENT METHOD', marginX, y);
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('REFERENCE', marginX + colW + 30, y);
+  doc.font('Helvetica').fontSize(11).fillColor('#1a1a2e').text(pay.method || '—', marginX, y + 13);
+  doc.font('Helvetica').fontSize(11).fillColor('#1a1a2e').text(pay.reference || '—', marginX + colW + 30, y + 13);
+  y += 45;
+
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('FOR', marginX, y);
+  doc.font('Helvetica').fontSize(10.5).fillColor('#1a1a2e').text(`Invoice ${inv.num}${pay.notes ? ' — ' + pay.notes : ''}`, marginX, y + 13, { width: pageW - marginX * 2 });
+  y = doc.y + 40;
+
+  const sigBuf = pdfImageBuffer(s.company_signature);
+  const stampBuf = pdfImageBuffer(s.company_stamp);
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('SIGNATURE', marginX, y);
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(FAINT).text('STAMP', marginX + 150, y);
+  if (sigBuf) { try { doc.image(sigBuf, marginX, y + 14, { fit: [110, 55] }); } catch (e) {} }
+  if (stampBuf) { try { doc.image(stampBuf, marginX + 150, y + 14, { fit: [80, 80] }); } catch (e) {} }
+}
 
 function renderQuotePdf(doc, { qt, rows, s, cyber }) {
   const NAVY = '#0a3258', SOFT = '#666666', FAINT = '#999999';
@@ -1728,12 +1815,28 @@ app.get('/api/hotels/:id', auth, async (req, res) => {
     res.json(h);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.get('/api/hotels/:id/voucher-pdf', auth, async (req, res) => {
+  try {
+    const h = await queryOne('SELECT * FROM hotel_bookings WHERE id=?', [req.params.id]);
+    if (!h) return res.status(404).json({ error: 'Not found' });
+    if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(h.owner_id)) return res.status(403).json({ error: 'Access denied' });
+    if (isIsolated(req.session.user.role) && h.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    const s = await getScopedSettings(req.session.user);
+    const rasterized = await rasterizeBrandAssets(s); Object.assign(s, rasterized);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Voucher-${h.num}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    doc.pipe(res);
+    renderHotelVoucherPdf(doc, { h, s });
+    doc.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
+});
 app.post('/api/hotels', auth, async (req, res) => {
   try {
-    const { num, hotel_name, confirmation_num, destination, room_type, passenger, checkin_date, checkout_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
+    const { num, hotel_name, hotel_address, hotel_phone, confirmation_num, destination, room_type, passenger, checkin_date, checkout_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
     const r = await queryOne(
-      'INSERT INTO hotel_bookings (num,hotel_name,confirmation_num,destination,room_type,passenger,checkin_date,checkout_date,currency,net_price,selling_price,status,notes,booking_type,client_id,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, hotel_name || '', confirmation_num || '', destination || '', room_type || '', passenger || '', cleanDate(checkin_date) || '', cleanDate(checkout_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', booking_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]);
+      'INSERT INTO hotel_bookings (num,hotel_name,hotel_address,hotel_phone,confirmation_num,destination,room_type,passenger,checkin_date,checkout_date,currency,net_price,selling_price,status,notes,booking_type,client_id,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
+      [num, hotel_name || '', hotel_address || '', hotel_phone || '', confirmation_num || '', destination || '', room_type || '', passenger || '', cleanDate(checkin_date) || '', cleanDate(checkout_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', booking_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]);
     res.json({ id: r.id, num });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1744,9 +1847,9 @@ app.put('/api/hotels/:id', auth, async (req, res) => {
       if (isIsolated(req.session.user.role) && (!h || h.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
       if (req.session.user.role === 'patron' && h && await isOwnedByIsolatedUser(h.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
-    const { hotel_name, confirmation_num, destination, room_type, passenger, checkin_date, checkout_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
-    await run('UPDATE hotel_bookings SET hotel_name=?,confirmation_num=?,destination=?,room_type=?,passenger=?,checkin_date=?,checkout_date=?,currency=?,net_price=?,selling_price=?,status=?,notes=?,booking_type=?,client_id=? WHERE id=?',
-      [hotel_name || '', confirmation_num || '', destination || '', room_type || '', passenger || '', cleanDate(checkin_date) || '', cleanDate(checkout_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', booking_type || 'individual', client_id || null, req.params.id]);
+    const { hotel_name, hotel_address, hotel_phone, confirmation_num, destination, room_type, passenger, checkin_date, checkout_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
+    await run('UPDATE hotel_bookings SET hotel_name=?,hotel_address=?,hotel_phone=?,confirmation_num=?,destination=?,room_type=?,passenger=?,checkin_date=?,checkout_date=?,currency=?,net_price=?,selling_price=?,status=?,notes=?,booking_type=?,client_id=? WHERE id=?',
+      [hotel_name || '', hotel_address || '', hotel_phone || '', confirmation_num || '', destination || '', room_type || '', passenger || '', cleanDate(checkin_date) || '', cleanDate(checkout_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', booking_type || 'individual', client_id || null, req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2191,17 +2294,36 @@ app.get('/api/payments', auth, async (req, res) => {
       if (from) { conds.push('payments.date>=?'); p.push(from); }
       if (to) { conds.push('payments.date<=?'); p.push(to); }
       return res.json(await query(
-        `SELECT payments.* FROM payments JOIN invoices ON invoices.id=payments.invoice_id WHERE ${conds.join(' AND ')} ORDER BY payments.created_at DESC`, p));
+        `SELECT payments.*, invoices.currency FROM payments JOIN invoices ON invoices.id=payments.invoice_id WHERE ${conds.join(' AND ')} ORDER BY payments.created_at DESC`, p));
     }
     let conds = ['1=1']; const p = [];
     if (req.session.user.role === 'employe') { conds.push('invoices.owner_id=?'); p.push(req.session.user.id); }
     if (from) { conds.push('payments.date>=?'); p.push(from); }
     if (to) { conds.push('payments.date<=?'); p.push(to); }
-    let q = `SELECT payments.* FROM payments LEFT JOIN invoices ON invoices.id=payments.invoice_id WHERE ${conds.join(' AND ')}`;
+    let q = `SELECT payments.*, invoices.currency FROM payments LEFT JOIN invoices ON invoices.id=payments.invoice_id WHERE ${conds.join(' AND ')}`;
     if (req.session.user.role === 'patron') q += PATRON_EXCLUDE_ISOLATED;
     q += ' ORDER BY payments.created_at DESC';
     res.json(await query(q, p));
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/payments/:id/receipt-pdf', auth, async (req, res) => {
+  try {
+    const pay = await queryOne('SELECT * FROM payments WHERE id=?', [req.params.id]);
+    if (!pay) return res.status(404).json({ error: 'Not found' });
+    const inv = pay.invoice_id ? await queryOne('SELECT * FROM invoices WHERE id=?', [pay.invoice_id]) : null;
+    if (inv) {
+      if (req.session.user.role === 'patron' && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
+      if (isIsolated(req.session.user.role) && inv.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
+    }
+    const s = await getScopedSettings(req.session.user);
+    const rasterized = await rasterizeBrandAssets(s); Object.assign(s, rasterized);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Receipt-${pay.id}.pdf"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    doc.pipe(res);
+    renderReceiptPdf(doc, { pay, inv: inv || { client_name: pay.client_name, currency: 'KWD', num: pay.invoice_num || '—' }, s });
+    doc.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
 });
 app.post('/api/payments', auth, async (req, res) => {
   try {
