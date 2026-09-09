@@ -1608,14 +1608,21 @@ function parsePdfText(text) {
       if (parts.length === 3) date = parts[2] + '-' + parts[1] + '-' + parts[0].padStart(2, '0');
     }
 
-    // Due date - read from the "PAYMENT TERMS:" date on the scanned invoice, falling back
-    // to date + 7 days when that label isn't found on the page.
-    const termsIdx = tokens.findIndex(t => t === 'terms:' || t === 'due:');
+    // Due date - read from the "PAYMENT TERMS:" date on the scanned invoice. Matched with a
+    // regex on the raw text (case-insensitive, any amount of whitespace) rather than the
+    // token list above, since PDF text extraction doesn't reliably split "PAYMENT TERMS:"
+    // into the same lowercase single-word tokens as the other labels. Falls back to
+    // date + 7 days when that label isn't found on the page at all.
     let dueDate = '';
-    if (termsIdx !== -1) {
-      const raw = tokens[termsIdx + 1];
-      const parts = (raw || '').split('/');
-      if (parts.length === 3) dueDate = parts[2] + '-' + parts[1] + '-' + parts[0].padStart(2, '0');
+    const termsMatch = text.match(/payment\s*terms:?\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);
+    if (termsMatch) dueDate = `${termsMatch[3]}-${termsMatch[2]}-${termsMatch[1].padStart(2, '0')}`;
+    if (!dueDate) {
+      const termsIdx = tokens.findIndex(t => t === 'terms:' || t === 'due:');
+      if (termsIdx !== -1) {
+        const raw = tokens[termsIdx + 1];
+        const parts = (raw || '').split('/');
+        if (parts.length === 3) dueDate = parts[2] + '-' + parts[1] + '-' + parts[0].padStart(2, '0');
+      }
     }
     if (!dueDate && date) dueDate = addDays(date, 7);
 
