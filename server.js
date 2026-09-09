@@ -2602,6 +2602,7 @@ app.get('/verify/:token', async (req, res) => {
       <div class="row"><span class="k">Invoice #</span><span class="v">${escapeHtml(inv.num)}</span></div>
       <div class="row"><span class="k">Billed to</span><span class="v">${escapeHtml(inv.client_name)}</span></div>
       <div class="row"><span class="k">Date</span><span class="v">${escapeHtml(inv.date)}</span></div>
+      <div class="row"><span class="k">Payment Terms</span><span class="v">${escapeHtml(inv.due_date || '—')}</span></div>
       <div class="row"><span class="k">Amount</span><span class="v">${escapeHtml(inv.currency)} ${Number(inv.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
       <div class="row"><span class="k">Status</span><span class="v">${escapeHtml((inv.status || '').toUpperCase())}</span></div>
       <div class="foot">Scanned from the QR code printed on the invoice · ${escapeHtml(companyName)}</div>
@@ -2611,7 +2612,7 @@ app.get('/verify/:token', async (req, res) => {
 // JSON form of the same check, for anything that wants to verify programmatically.
 app.get('/api/verify/:token', async (req, res) => {
   try {
-    const inv = await queryOne('SELECT num,client_name,date,total,currency,status FROM invoices WHERE verify_token=?', [req.params.token]);
+    const inv = await queryOne('SELECT num,client_name,date,due_date,total,currency,status FROM invoices WHERE verify_token=?', [req.params.token]);
     if (!inv) return res.status(404).json({ authentic: false });
     res.json({ authentic: true, ...inv });
   } catch (e) { res.status(500).json({ error: e.message }); }
