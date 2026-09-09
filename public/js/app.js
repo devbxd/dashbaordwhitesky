@@ -1608,6 +1608,17 @@ function parsePdfText(text) {
       if (parts.length === 3) date = parts[2] + '-' + parts[1] + '-' + parts[0].padStart(2, '0');
     }
 
+    // Due date - read from the "PAYMENT TERMS:" date on the scanned invoice, falling back
+    // to date + 7 days when that label isn't found on the page.
+    const termsIdx = tokens.findIndex(t => t === 'terms:' || t === 'due:');
+    let dueDate = '';
+    if (termsIdx !== -1) {
+      const raw = tokens[termsIdx + 1];
+      const parts = (raw || '').split('/');
+      if (parts.length === 3) dueDate = parts[2] + '-' + parts[1] + '-' + parts[0].padStart(2, '0');
+    }
+    if (!dueDate && date) dueDate = addDays(date, 7);
+
     // Client
     const toIdx = tokens.findIndex(t => t === 'to:');
     const clientFromPdf = toIdx !== -1 ? tokens[toIdx + 1] : '';
@@ -1679,6 +1690,7 @@ const destination = rowTokens[i] || ''; i++;
     // Fill form
     document.getElementById('pdf-num').value = num;
     document.getElementById('pdf-date').value = date;
+    document.getElementById('pdf-due-date').value = dueDate;
     document.getElementById('pdf-currency').value = currency;
     document.getElementById('pdf-total').value = total;
 
@@ -1730,7 +1742,7 @@ async function savePdfInvoice() {
 
   if (!num || !clientName) { toast('Invoice # and client are required', 'error'); return; }
 
-  const dueDate = '';
+  const dueDate = document.getElementById('pdf-due-date').value;
 
   const rows = (window._pdfImportRows && window._pdfImportRows.length > 0)
     ? window._pdfImportRows
