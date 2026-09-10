@@ -95,21 +95,35 @@ const NUM_RESOURCE = {
   invoices: { table: 'invoices', key: 'inv', default: 'INV-' },
   quotes: { table: 'quotes', key: 'qte', default: 'QTE-' },
 };
-// A saved company (client_id set from the dropdown) gets its own invoice sequence - plain
-// digits, no name/prefix shown - that keeps counting up no matter what other invoices (other
-// companies or walk-ins) happen in between. A walk-in (no client_id) shares one separate
-// "INV-001, INV-002, ..." sequence with other walk-ins only.
+// A saved company (client_id set from the dropdown) gets its own invoice sequence that keeps
+// counting up no matter what other invoices (other companies or walk-ins) happen in between.
+// Two companies both starting a plain, unprefixed count at "001" would eventually collide
+// once either one has enough invoices to reach a number the other already used - not a
+// hypothetical, it's guaranteed given enough invoices - so each company is assigned a small
+// numeric code (in first-invoiced order, unrelated to its name) once, cached on the client
+// row, and its invoices are "<code>-<seq>" - e.g. "01-001, 01-002" for the first company ever
+// invoiced. Still just digits, never the company's name, but now collision-proof. A walk-in
+// (no client_id) shares one separate "INV-001, INV-002, ..." sequence with other walk-ins only.
+async function getClientNumCode(client) {
+  // Older versions of this feature stored a name-derived prefix here (e.g. "SADITAHOLDIN") -
+  // only trust it if it's a plain numeric code from this scheme, otherwise assign a fresh one.
+  if (client.invoice_prefix && /^[0-9]+$/.test(client.invoice_prefix)) return client.invoice_prefix;
+  const row = await queryOne("SELECT COALESCE(MAX(invoice_prefix::int), 0) as maxcode FROM clients WHERE invoice_prefix ~ '^[0-9]+$'");
+  const code = String((row ? row.maxcode : 0) + 1).padStart(2, '0');
+  await run('UPDATE clients SET invoice_prefix=? WHERE id=?', [code, client.id]);
+  return code;
+}
 async function computeNextNum(resourceKey, user, clientId) {
   const cfg = NUM_RESOURCE[resourceKey];
   if (resourceKey === 'invoices' && clientId) {
-    const last = await queryOne('SELECT num FROM invoices WHERE client_id=? ORDER BY id DESC LIMIT 1', [clientId]);
-    const m = last && last.num.match(/(\d+)$/);
-    let n = m ? parseInt(m[1], 10) + 1 : 1;
-    let num = String(n).padStart(3, '0');
-    // Two different companies both landing on plain "011" would collide (no prefix to tell
-    // them apart) - walk forward to the next free number instead of failing the insert.
-    while (await queryOne('SELECT id FROM invoices WHERE num=?', [num])) { n++; num = String(n).padStart(3, '0'); }
-    return num;
+    const client = await queryOne('SELECT * FROM clients WHERE id=?', [clientId]);
+    if (client) {
+      const code = await getClientNumCode(client);
+      const last = await queryOne('SELECT num FROM invoices WHERE client_id=? ORDER BY id DESC LIMIT 1', [clientId]);
+      const m = last && last.num.match(/-(\d+)$/);
+      const n = m ? parseInt(m[1], 10) + 1 : 1;
+      return `${code}-${String(n).padStart(3, '0')}`;
+    }
   }
   if (isIsolated(user.role)) {
     const prefix = (NUM_PREFIX[user.role] || NUM_PREFIX.demo)[cfg.key];
@@ -440,28 +454,36 @@ async function initDB() {
   await pool.query(`
     ALTER TABLE hotel_bookings ADD COLUMN IF NOT EXISTS hotel_address TEXT;
     ALTER TABLE hotel_bookings ADD COLUMN IF NOT EXISTS hotel_phone TEXT;
+    ALTER TABLE clients ADD COLUMN IF NOT EXISTS invoice_prefix TEXT;
   `);
   const untokened = await query('SELECT id FROM invoices WHERE verify_token IS NULL');
   for (const inv of untokened) {
     await run('UPDATE invoices SET verify_token=? WHERE id=?', [crypto.randomBytes(12).toString('hex'), inv.id]);
   }
   // One-time migration: saved companies used to show their name in the invoice number (e.g.
-  // "SADITA-001"); walk-ins used "FAC-001". Now a company's invoices are plain digits (own
-  // sequence, no name) and walk-ins share one "INV-001, INV-002, ..." sequence. Both halves
-  // are self-guarding: once migrated, company invoices are pure digits and walk-ins all start
-  // with "INV-", so neither WHERE clause matches anything on later boots.
+  // "SADITA-001"), then briefly plain digits shared across every company with no distinguishing
+  // mark at all - which is exactly why a second company's invoices collided into the first
+  // company's range instead of starting fresh. Now each company gets a small numeric code
+  // (first-invoiced order, unrelated to its name), cached on the client row, and its invoices
+  // become "<code>-<seq>" - e.g. "01-001, 01-002, ..." - so numbers stay unique and every
+  // company still gets its own clean sequence starting at 001. Walk-ins share one separate
+  // "INV-001, INV-002, ..." sequence. Both halves are self-guarding: once migrated, company
+  // invoices all match "<digits>-<digits>" and walk-ins all start with "INV-", so neither WHERE
+  // clause matches anything on later boots.
   const legacyGroupClients = await query(`
-    SELECT DISTINCT client_id FROM invoices
-    WHERE client_id IS NOT NULL AND num !~ '^[0-9]+$'
+    SELECT client_id FROM invoices
+    WHERE client_id IS NOT NULL AND num !~ '^[0-9]+-[0-9]+$'
       AND (owner_id IS NULL OR owner_id NOT IN (SELECT id FROM users WHERE role IN (${ISOLATED_ROLES_SQL})))
+    GROUP BY client_id ORDER BY MIN(created_at) ASC
   `);
+  let nextCode = ((await queryOne("SELECT COALESCE(MAX(invoice_prefix::int), 0) as maxcode FROM clients WHERE invoice_prefix ~ '^[0-9]+$'")) || { maxcode: 0 }).maxcode + 1;
   for (const { client_id } of legacyGroupClients) {
+    const code = String(nextCode++).padStart(2, '0');
+    await run('UPDATE clients SET invoice_prefix=? WHERE id=?', [code, client_id]);
     const clientInvoices = await query('SELECT id, num FROM invoices WHERE client_id=? ORDER BY created_at ASC, id ASC', [client_id]);
     let seq = 1;
     for (const inv of clientInvoices) {
-      let newNum = String(seq).padStart(3, '0');
-      while (await queryOne('SELECT id FROM invoices WHERE num=? AND id<>?', [newNum, inv.id])) { seq++; newNum = String(seq).padStart(3, '0'); }
-      seq++;
+      const newNum = `${code}-${String(seq++).padStart(3, '0')}`;
       if (newNum === inv.num) continue;
       await run('UPDATE invoices SET num=? WHERE id=?', [newNum, inv.id]);
       await run('UPDATE payments SET invoice_num=? WHERE invoice_id=?', [newNum, inv.id]);
