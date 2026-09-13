@@ -406,8 +406,8 @@ function applyBranding(){
   // M&S Cyber Systems isn't a travel agency — these modules (ticket sales, hotel bookings,
   // visas, group trips, passport docs) don't apply to that business, so they're hidden for
   // the 'cyber' account instead of cluttering its sidebar with irrelevant sections.
-  const travelOnlyPages=['tickets','new-ticket','hotels','new-hotel','hotel-vouchers','visas','new-visa','groups','new-group','passports','new-passport'];
-  const travelOnlySeps=['hotels-sep','visas-sep','groups-sep','passports-sep'];
+  const travelOnlyPages=['command-center','tickets','new-ticket','hotels','new-hotel','hotel-vouchers','visas','new-visa','groups','new-group','passports','new-passport'];
+  const travelOnlySeps=['cc-sep','hotels-sep','visas-sep','groups-sep','passports-sep'];
   travelOnlyPages.forEach(p=>document.querySelector(`.nav-item[data-page="${p}"]`)?.classList.toggle('hidden',cyber));
   travelOnlySeps.forEach(id=>document.getElementById(id)?.classList.toggle('hidden',cyber));
   document.querySelector('.nav-sep[data-sep="tickets"]')?.classList.toggle('hidden',cyber);
@@ -420,7 +420,7 @@ const SKELETON_PAGE='<div class="skeleton-page"><div class="skeleton skeleton-bl
 // covers both the skeleton appearing and the real content replacing it, without needing
 // every one of the ~30 page*() render functions to know about the animation themselves.
 new MutationObserver(()=>{const mc=document.getElementById('main-content');mc.classList.remove('page-enter');void mc.offsetWidth;mc.classList.add('page-enter');}).observe(document.getElementById('main-content'),{childList:true});
-function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML=SKELETON_PAGE;const pages={dashboard:pageDashboard,clients:pageClients,catalog:pageCatalog,quotes:pageQuotes,'new-quote':pageNewQuote,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,hotels:pageHotels,'new-hotel':pageNewHotel,'hotel-vouchers':pageHotelVouchers,visas:pageVisas,'new-visa':pageNewVisa,groups:pageGroups,'new-group':pageNewGroup,passports:pagePassports,'new-passport':pageNewPassport,payments:pagePayments,receipts:pageReceipts,expenses:pageExpenses,'credit-notes':pageCreditNotes,statements:pageStatements,reports:pageReports,settings:pageSettings,admin:pageAdmin,projects:pageProjects};if(pages[page])pages[page](mc);}
+function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML=SKELETON_PAGE;const pages={dashboard:pageDashboard,'command-center':pageCommandCenter,clients:pageClients,catalog:pageCatalog,quotes:pageQuotes,'new-quote':pageNewQuote,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,hotels:pageHotels,'new-hotel':pageNewHotel,'hotel-vouchers':pageHotelVouchers,visas:pageVisas,'new-visa':pageNewVisa,groups:pageGroups,'new-group':pageNewGroup,passports:pagePassports,'new-passport':pageNewPassport,payments:pagePayments,receipts:pageReceipts,expenses:pageExpenses,'credit-notes':pageCreditNotes,statements:pageStatements,reports:pageReports,settings:pageSettings,admin:pageAdmin,projects:pageProjects};if(pages[page])pages[page](mc);}
 
 /* DASHBOARD */
 function deadlineWhen(days){if(days<0)return`${-days}d overdue`;if(days===0)return'Today';if(days===1)return'Tomorrow';return`in ${days}d`;}
@@ -459,6 +459,102 @@ ${out.length===0?`<tr><td colspan="7"><div class="empty-state"><i class="ti ti-m
 }catch(e){
 mc.innerHTML=`<div class="empty-state"><i class="ti ti-alert-triangle"></i><h3>Couldn't load the dashboard</h3><p>${e.message||'Something went wrong.'}</p><button class="btn-new" onclick="showPage('dashboard')" style="margin-top:1rem"><i class="ti ti-refresh"></i> Retry</button></div>`;
 }
+}
+
+/* COMMAND CENTER — live 3D globe of every trip currently happening or about to happen,
+   built from /api/command-center. globe.gl (bundles three.js) is ~1.9MB, so it's only
+   fetched the first time this page is opened, not on every app load. */
+let _globeLibPromise=null,_ccWorld=null;
+function loadGlobeLib(){
+  if(window.Globe)return Promise.resolve();
+  if(_globeLibPromise)return _globeLibPromise;
+  _globeLibPromise=new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/dist/globe.gl.min.js';
+    s.onload=()=>resolve();s.onerror=()=>reject(new Error('Could not load the globe library'));
+    document.head.appendChild(s);
+  });
+  return _globeLibPromise;
+}
+function ccPinEl(d){
+  const el=document.createElement('div');
+  const size=Math.min(30,14+Math.sqrt(d.count)*4);
+  el.className='cc-pin '+d.status;
+  el.style.width=size+'px';el.style.height=size+'px';
+  const tip=`${d.destination} — ${d.count} trip${d.count>1?'s':''}${d.active?` · ${d.active} active now`:''}`;
+  el.innerHTML=`<div class="cc-pin-ring"></div><div class="cc-pin-core"></div><div class="cc-pin-tip">${tip}</div>`;
+  el.onclick=()=>{if(_ccWorld)_ccWorld.pointOfView({lat:d.lat,lng:d.lng,altitude:1.35},900);};
+  return el;
+}
+async function pageCommandCenter(mc){
+mc.innerHTML=`
+<div class="page-header"><div><div class="page-title"><i class="ti ti-world" style="vertical-align:-3px;margin-right:6px;color:var(--accent)"></i>Command Center</div><div class="page-sub">Every trip, live on the map</div></div></div>
+<div class="cc-stat-strip">
+  <div class="cc-stat gold"><div class="cc-stat-num" id="cc-stat-active">—</div><div class="cc-stat-lbl">Travelers away right now</div></div>
+  <div class="cc-stat"><div class="cc-stat-num" id="cc-stat-departing">—</div><div class="cc-stat-lbl">Departing this week</div></div>
+  <div class="cc-stat"><div class="cc-stat-num" id="cc-stat-upcoming">—</div><div class="cc-stat-lbl">Upcoming (90 days)</div></div>
+  <div class="cc-stat"><div class="cc-stat-num" id="cc-stat-dests">—</div><div class="cc-stat-lbl">Active destinations</div></div>
+</div>
+<div class="cc-body">
+  <div class="cc-globe-card"><div class="cc-globe-badge"><i class="ti ti-satellite"></i> Live</div><div class="cc-globe-mount" id="cc-globe-mount"><div class="cc-globe-loading"><i class="ti ti-loader spin"></i>Loading globe…</div></div></div>
+  <div class="cc-side"><div class="cc-side-title">Destinations</div><div id="cc-dest-list"><div class="empty-state" style="padding:2rem 0"><i class="ti ti-loader spin"></i></div></div></div>
+</div>`;
+let data;
+try{data=await api('GET','/api/command-center');}catch(e){data={error:e.message};}
+if(!document.getElementById('cc-globe-mount'))return; // navigated away while loading
+if(!data||data.error||!data.stats){
+  const mount=document.getElementById('cc-globe-mount');
+  if(mount)mount.innerHTML=`<div class="cc-globe-loading"><i class="ti ti-alert-triangle"></i>${(data&&data.error)||"Couldn't load Command Center data"}</div>`;
+  return;
+}
+document.getElementById('cc-stat-active').textContent=data.stats.activeNow;
+document.getElementById('cc-stat-departing').textContent=data.stats.departingSoon;
+document.getElementById('cc-stat-upcoming').textContent=data.stats.upcoming;
+document.getElementById('cc-stat-dests').textContent=data.stats.destinationsActive;
+
+const points=[];let unresolved=0;
+for(const d of data.destinations){
+  const coords=resolveDestinationCoords(d.destination);
+  if(!coords){unresolved++;continue;}
+  const status=d.active>0?'active':d.departing>0?'departing':d.upcoming>0?'upcoming':'recent';
+  points.push({lat:coords[0],lng:coords[1],destination:d.destination,count:d.count,active:d.active,status});
+}
+const sortedDests=[...data.destinations].sort((a,b)=>b.count-a.count);
+const listHtml=sortedDests.map(d=>{
+  const status=d.active>0?'active':d.departing>0?'departing':d.upcoming>0?'upcoming':'recent';
+  return`<div class="cc-dest-row" onclick="ccFlyTo('${d.destination.replace(/'/g,"\\'")}')"><div class="cc-dest-dot ${status}"></div><div class="cc-dest-name">${d.destination}</div><div class="cc-dest-count">${d.count}</div></div>`;
+}).join('')||`<div class="empty-state" style="padding:2rem 0"><i class="ti ti-map-off"></i><h3>No trips with a destination yet</h3></div>`;
+const listEl=document.getElementById('cc-dest-list');
+if(listEl)listEl.innerHTML=listHtml+(unresolved?`<div style="font-size:11px;color:var(--ink-faint);padding:8px 6px">+${unresolved} destination(s) not mapped yet</div>`:'');
+
+try{
+  await loadGlobeLib();
+}catch(e){
+  const mount=document.getElementById('cc-globe-mount');
+  if(mount)mount.innerHTML=`<div class="cc-globe-loading"><i class="ti ti-alert-triangle"></i>${e.message}</div>`;
+  return;
+}
+const mount=document.getElementById('cc-globe-mount');
+if(!mount)return; // navigated away while the globe library was loading
+mount.innerHTML='';
+const world=Globe()(mount)
+  .globeImageUrl('https://unpkg.com/three-globe@2.45.2/example/img/earth-night.jpg')
+  .bumpImageUrl('https://unpkg.com/three-globe@2.45.2/example/img/earth-topology.png')
+  .backgroundImageUrl('https://unpkg.com/three-globe@2.45.2/example/img/night-sky.png')
+  .width(mount.clientWidth||800).height(mount.clientHeight||480)
+  .htmlElementsData(points)
+  .htmlLat('lat').htmlLng('lng')
+  .htmlElement(ccPinEl)
+  .atmosphereColor('#6FB3E0').atmosphereAltitude(0.18);
+_ccWorld=world;
+world.pointOfView({lat:26,lng:45,altitude:2.3},0);
+const controls=world.controls();
+if(controls){controls.autoRotate=true;controls.autoRotateSpeed=0.5;}
+}
+function ccFlyTo(destination){
+  if(!_ccWorld)return;
+  const coords=resolveDestinationCoords(destination);
+  if(coords)_ccWorld.pointOfView({lat:coords[0],lng:coords[1],altitude:1.35},900);
 }
 
 /* CLIENTS */

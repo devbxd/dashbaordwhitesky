@@ -2525,6 +2525,83 @@ app.get('/api/upcoming', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Command Center: every trip with a destination and a date, pulled from hotels, group
+// trips, ticket sales and invoice line items, normalized into one feed so the globe can
+// plot "who is where, right now" without the client touching four different tables.
+app.get('/api/command-center', auth, async (req, res) => {
+  try {
+    const user = req.session.user;
+    function scopeCond(col) {
+      if (isIsolated(user.role) || user.role === 'employe') return { sql: `${col}=?`, params: [user.id] };
+      if (user.role === 'patron') return { sql: `(${col} IS NULL OR ${col} NOT IN (SELECT id FROM users WHERE role IN (${ISOLATED_ROLES_SQL})))`, params: [] };
+      return { sql: '1=1', params: [] };
+    }
+    const today = cleanDate(new Date().toISOString());
+    const past = cleanDate(new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString());
+    const future = cleanDate(new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString());
+    const movements = [];
+
+    {
+      const { sql, params } = scopeCond('owner_id');
+      const rows = await query(
+        `SELECT destination, passenger, hotel_name, checkin_date AS start_date, checkout_date AS end_date FROM hotel_bookings
+         WHERE destination IS NOT NULL AND destination<>'' AND checkin_date IS NOT NULL AND checkin_date<>'' AND checkin_date<=? AND (checkout_date>=? OR checkout_date IS NULL OR checkout_date='') AND (${sql}) LIMIT 300`,
+        [future, past, ...params]);
+      for (const r of rows) movements.push({ type: 'hotel', icon: 'ti-building-skyscraper', destination: r.destination, who: r.passenger || r.hotel_name || 'Guest', start: r.start_date, end: r.end_date || r.start_date });
+    }
+    {
+      const { sql, params } = scopeCond('owner_id');
+      const rows = await query(
+        `SELECT destination, name, departure_date AS start_date, return_date AS end_date FROM groups_trips
+         WHERE destination IS NOT NULL AND destination<>'' AND departure_date IS NOT NULL AND departure_date<>'' AND departure_date<=? AND (return_date>=? OR return_date IS NULL OR return_date='') AND (${sql}) LIMIT 300`,
+        [future, past, ...params]);
+      for (const r of rows) movements.push({ type: 'group', icon: 'ti-users-group', destination: r.destination, who: r.name || 'Group', start: r.start_date, end: r.end_date || r.start_date });
+    }
+    {
+      const { sql, params } = scopeCond('owner_id');
+      const rows = await query(
+        `SELECT destination, passenger, date FROM ticket_sales
+         WHERE destination IS NOT NULL AND destination<>'' AND date>=? AND date<=? AND (${sql}) LIMIT 300`,
+        [past, future, ...params]);
+      for (const r of rows) movements.push({ type: 'ticket', icon: 'ti-ticket', destination: r.destination, who: r.passenger || 'Traveler', start: r.date, end: r.date });
+    }
+    {
+      const { sql, params } = scopeCond('i.owner_id');
+      const rows = await query(
+        `SELECT ir.destination AS destination, ir.passenger AS passenger, ir.travel_date AS date FROM invoice_rows ir JOIN invoices i ON i.id=ir.invoice_id
+         WHERE ir.destination IS NOT NULL AND ir.destination<>'' AND ir.travel_date>=? AND ir.travel_date<=? AND (${sql}) LIMIT 300`,
+        [past, future, ...params]);
+      for (const r of rows) movements.push({ type: 'invoice', icon: 'ti-file-invoice', destination: r.destination, who: r.passenger || 'Traveler', start: r.date, end: r.date });
+    }
+
+    function classify(start, end) {
+      const e = end || start;
+      if (start <= today && today <= e) return 'active';
+      if (start > today) return (new Date(start) - new Date(today)) / 86400000 <= 7 ? 'departing' : 'upcoming';
+      return 'recent';
+    }
+    const destMap = {};
+    for (const m of movements) {
+      m.status = classify(m.start, m.end);
+      const key = m.destination.trim();
+      if (!key) continue;
+      if (!destMap[key]) destMap[key] = { destination: key, count: 0, active: 0, departing: 0, upcoming: 0, recent: 0, sample: [] };
+      const d = destMap[key];
+      d.count++; d[m.status]++;
+      if (d.sample.length < 5) d.sample.push({ who: m.who, type: m.type, icon: m.icon, start: m.start, end: m.end, status: m.status });
+    }
+    const destinations = Object.values(destMap).sort((a, b) => b.count - a.count);
+    const stats = {
+      activeNow: movements.filter(m => m.status === 'active').length,
+      departingSoon: movements.filter(m => m.status === 'departing').length,
+      upcoming: movements.filter(m => m.status === 'upcoming').length,
+      destinationsActive: new Set(movements.filter(m => m.status === 'active').map(m => m.destination)).size,
+      totalDestinations: destinations.length,
+    };
+    res.json({ stats, destinations, movements: movements.slice(0, 500) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/users', patronOrCyber, async (req, res) => {
   try { res.json(await query('SELECT id,username,role,display_name,active FROM users ORDER BY id')); }
   catch (e) { res.status(500).json({ error: e.message }); }
