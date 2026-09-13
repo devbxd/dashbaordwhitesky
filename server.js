@@ -131,18 +131,26 @@ async function computeNextNum(resourceKey, user, clientId) {
       return `${code}-${String(n).padStart(3, '0')}`;
     }
   }
+  // "Last row inserted in the table" is not the same as "highest number already used with
+  // this prefix" — a demo/cyber/client tenant's row can be the most recently inserted one
+  // table-wide while using a totally different prefix (e.g. "DEMO-TKT-001"), which used to
+  // make this pick up THEIR trailing digits and hand out a number the real sequence had
+  // already used. Scoping the MAX to rows that actually start with this exact prefix fixes
+  // that regardless of what any other tenant just inserted.
+  async function maxSuffix(table, prefix, extraCond, extraParams) {
+    const row = await queryOne(
+      `SELECT MAX(CAST(SUBSTRING(num FROM '([0-9]+)$') AS INTEGER)) AS maxnum FROM ${table} WHERE num LIKE ? ${extraCond || ''}`,
+      [prefix + '%', ...(extraParams || [])]);
+    return (row && row.maxnum) ? row.maxnum : 0;
+  }
   if (isIsolated(user.role)) {
     const prefix = (NUM_PREFIX[user.role] || NUM_PREFIX.demo)[cfg.key];
-    const last = await queryOne(`SELECT num FROM ${cfg.table} WHERE owner_id=? ORDER BY id DESC LIMIT 1`, [user.id]);
-    if (!last) return prefix + '001';
-    const m = last.num.match(/(\d+)$/);
-    return prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
+    const n = await maxSuffix(cfg.table, prefix, 'AND owner_id=?', [user.id]);
+    return prefix + String(n + 1).padStart(3, '0');
   }
-  const walkinFilter = resourceKey === 'invoices' ? 'WHERE client_id IS NULL' : '';
-  const last = await queryOne(`SELECT num FROM ${cfg.table} ${walkinFilter} ORDER BY id DESC LIMIT 1`);
-  if (!last) return cfg.default + '001';
-  const m = last.num.match(/(\d+)$/);
-  return cfg.default + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0');
+  const walkinCond = resourceKey === 'invoices' ? 'AND client_id IS NULL' : '';
+  const n = await maxSuffix(cfg.table, cfg.default, walkinCond, []);
+  return cfg.default + String(n + 1).padStart(3, '0');
 }
 async function withUniqueNumRetry(resourceKey, user, clientId, tryInsert, maxAttempts = 5) {
   let num = await computeNextNum(resourceKey, user, clientId);
