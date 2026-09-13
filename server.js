@@ -94,6 +94,12 @@ const NUM_PREFIX = {
 const NUM_RESOURCE = {
   invoices: { table: 'invoices', key: 'inv', default: 'INV-' },
   quotes: { table: 'quotes', key: 'qte', default: 'QTE-' },
+  tickets: { table: 'ticket_sales', key: 'tkt', default: 'TKT-' },
+  hotels: { table: 'hotel_bookings', key: 'htl', default: 'HTL-' },
+  groups: { table: 'groups_trips', key: 'grp', default: 'GRP-' },
+  visas: { table: 'visas', key: 'visa', default: 'VISA-' },
+  'credit-notes': { table: 'credit_notes', key: 'cn', default: 'CN-' },
+  expenses: { table: 'expenses', key: 'exp', default: 'EXP-' },
 };
 // A saved company (client_id set from the dropdown) gets its own invoice sequence that keeps
 // counting up no matter what other invoices (other companies or walk-ins) happen in between.
@@ -1664,19 +1670,8 @@ app.delete('/api/items/:id', auth, async (req, res) => {
 
 /* ─── CREDIT NOTES ─── */
 app.get('/api/credit-notes/next-num', auth, async (req, res) => {
-  try {
-    if (isIsolated(req.session.user.role)) {
-      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).cn || 'CN-';
-      const last = await queryOne('SELECT num FROM credit_notes WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
-      if (!last) return res.json({ num: prefix + '001' });
-      const m = last.num.match(/(\d+)$/);
-      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-    }
-    const last = await queryOne('SELECT num FROM credit_notes ORDER BY id DESC LIMIT 1');
-    if (!last) return res.json({ num: 'CN-001' });
-    const m = last.num.match(/(\d+)$/);
-    res.json({ num: 'CN-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json({ num: await computeNextNum('credit-notes', req.session.user) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/credit-notes', auth, async (req, res) => {
   try {
@@ -1699,15 +1694,15 @@ app.get('/api/credit-notes/:id', auth, async (req, res) => {
 });
 app.post('/api/credit-notes', auth, async (req, res) => {
   try {
-    const { num, invoice_id, invoice_num, client_name, date, reason, amount, currency } = req.body;
+    const { invoice_id, invoice_num, client_name, date, reason, amount, currency } = req.body;
     if (invoice_id && (isIsolated(req.session.user.role) || req.session.user.role === 'patron')) {
       const inv = await queryOne('SELECT owner_id FROM invoices WHERE id=?', [invoice_id]);
       if (isIsolated(req.session.user.role) && (!inv || inv.owner_id !== req.session.user.id)) return res.status(403).json({ error: 'Access denied' });
       if (req.session.user.role === 'patron' && inv && await isOwnedByIsolatedUser(inv.owner_id)) return res.status(403).json({ error: 'Access denied' });
     }
-    const r = await queryOne(
+    const { num, row: r } = await withUniqueNumRetry('credit-notes', req.session.user, null, (num) => queryOne(
       'INSERT INTO credit_notes (num,invoice_id,invoice_num,client_name,date,reason,amount,currency,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, invoice_id || null, invoice_num || '', client_name, cleanDate(date), reason || '', parseFloat(amount) || 0, currency || 'KWD', req.session.user.id, req.session.user.display_name]);
+      [num, invoice_id || null, invoice_num || '', client_name, cleanDate(date), reason || '', parseFloat(amount) || 0, currency || 'KWD', req.session.user.id, req.session.user.display_name]));
     if (invoice_id) await run("UPDATE invoices SET status='refunded' WHERE id=?", [invoice_id]);
     res.json({ id: r.id, num });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1724,19 +1719,8 @@ app.delete('/api/credit-notes/:id', auth, async (req, res) => {
 });
 
 app.get('/api/tickets/next-num', auth, async (req, res) => {
-  try {
-    if (isIsolated(req.session.user.role)) {
-      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).tkt;
-      const last = await queryOne('SELECT num FROM ticket_sales WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
-      if (!last) return res.json({ num: prefix + '001' });
-      const m = last.num.match(/(\d+)$/);
-      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-    }
-    const last = await queryOne('SELECT num FROM ticket_sales ORDER BY id DESC LIMIT 1');
-    if (!last) return res.json({ num: 'TKT-001' });
-    const m = last.num.match(/(\d+)$/);
-    res.json({ num: 'TKT-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json({ num: await computeNextNum('tickets', req.session.user) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/tickets', auth, async (req, res) => {
   try {
@@ -1759,10 +1743,10 @@ app.get('/api/tickets/:id', auth, async (req, res) => {
 });
 app.post('/api/tickets', auth, async (req, res) => {
   try {
-    const { num, airline, pnr, company, destination, passenger, date, system_issue, currency, net_price, selling_price, status, notes, ticket_type, client_id } = req.body;
-    const r = await queryOne(
+    const { airline, pnr, company, destination, passenger, date, system_issue, currency, net_price, selling_price, status, notes, ticket_type, client_id } = req.body;
+    const { num, row: r } = await withUniqueNumRetry('tickets', req.session.user, null, (num) => queryOne(
       'INSERT INTO ticket_sales (num,airline,pnr,company,destination,passenger,date,system_issue,currency,net_price,selling_price,status,notes,ticket_type,client_id,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, airline || '', pnr || '', company || '', destination || '', passenger || '', cleanDate(date) || '', system_issue || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', ticket_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]);
+      [num, airline || '', pnr || '', company || '', destination || '', passenger || '', cleanDate(date) || '', system_issue || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', ticket_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]));
     res.json({ id: r.id, num });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1804,19 +1788,8 @@ app.delete('/api/tickets/:id', auth, async (req, res) => {
 
 /* ─── HOTELS ─── */
 app.get('/api/hotels/next-num', auth, async (req, res) => {
-  try {
-    if (isIsolated(req.session.user.role)) {
-      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).htl;
-      const last = await queryOne('SELECT num FROM hotel_bookings WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
-      if (!last) return res.json({ num: prefix + '001' });
-      const m = last.num.match(/(\d+)$/);
-      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-    }
-    const last = await queryOne('SELECT num FROM hotel_bookings ORDER BY id DESC LIMIT 1');
-    if (!last) return res.json({ num: 'HTL-001' });
-    const m = last.num.match(/(\d+)$/);
-    res.json({ num: 'HTL-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json({ num: await computeNextNum('hotels', req.session.user) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/hotels', auth, async (req, res) => {
   try {
@@ -1855,10 +1828,10 @@ app.get('/api/hotels/:id/voucher-pdf', auth, async (req, res) => {
 });
 app.post('/api/hotels', auth, async (req, res) => {
   try {
-    const { num, hotel_name, hotel_address, hotel_phone, confirmation_num, destination, room_type, passenger, checkin_date, checkout_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
-    const r = await queryOne(
+    const { hotel_name, hotel_address, hotel_phone, confirmation_num, destination, room_type, passenger, checkin_date, checkout_date, currency, net_price, selling_price, status, notes, booking_type, client_id } = req.body;
+    const { num, row: r } = await withUniqueNumRetry('hotels', req.session.user, null, (num) => queryOne(
       'INSERT INTO hotel_bookings (num,hotel_name,hotel_address,hotel_phone,confirmation_num,destination,room_type,passenger,checkin_date,checkout_date,currency,net_price,selling_price,status,notes,booking_type,client_id,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, hotel_name || '', hotel_address || '', hotel_phone || '', confirmation_num || '', destination || '', room_type || '', passenger || '', cleanDate(checkin_date) || '', cleanDate(checkout_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', booking_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]);
+      [num, hotel_name || '', hotel_address || '', hotel_phone || '', confirmation_num || '', destination || '', room_type || '', passenger || '', cleanDate(checkin_date) || '', cleanDate(checkout_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'unpaid', notes || '', booking_type || 'individual', client_id || null, req.session.user.id, req.session.user.display_name]));
     res.json({ id: r.id, num });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1899,19 +1872,8 @@ app.delete('/api/hotels/:id', auth, async (req, res) => {
 
 /* ─── VISAS ─── */
 app.get('/api/visas/next-num', auth, async (req, res) => {
-  try {
-    if (isIsolated(req.session.user.role)) {
-      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).visa;
-      const last = await queryOne('SELECT num FROM visas WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
-      if (!last) return res.json({ num: prefix + '001' });
-      const m = last.num.match(/(\d+)$/);
-      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-    }
-    const last = await queryOne('SELECT num FROM visas ORDER BY id DESC LIMIT 1');
-    if (!last) return res.json({ num: 'VISA-001' });
-    const m = last.num.match(/(\d+)$/);
-    res.json({ num: 'VISA-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json({ num: await computeNextNum('visas', req.session.user) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/visas', auth, async (req, res) => {
   try {
@@ -1934,10 +1896,10 @@ app.get('/api/visas/:id', auth, async (req, res) => {
 });
 app.post('/api/visas', auth, async (req, res) => {
   try {
-    const { num, visa_type, country, passenger, passport_num, date, appointment_date, currency, net_price, selling_price, status, notes, booking_type, client_id, visa_file } = req.body;
-    const r = await queryOne(
+    const { visa_type, country, passenger, passport_num, date, appointment_date, currency, net_price, selling_price, status, notes, booking_type, client_id, visa_file } = req.body;
+    const { num, row: r } = await withUniqueNumRetry('visas', req.session.user, null, (num) => queryOne(
       'INSERT INTO visas (num,visa_type,country,passenger,passport_num,date,appointment_date,currency,net_price,selling_price,status,notes,booking_type,client_id,visa_file,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, visa_type || '', country || '', passenger || '', passport_num || '', cleanDate(date) || '', cleanDate(appointment_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'submitted', notes || '', booking_type || 'individual', client_id || null, visa_file || null, req.session.user.id, req.session.user.display_name]);
+      [num, visa_type || '', country || '', passenger || '', passport_num || '', cleanDate(date) || '', cleanDate(appointment_date) || '', currency || 'KWD', parseFloat(net_price) || 0, parseFloat(selling_price) || 0, status || 'submitted', notes || '', booking_type || 'individual', client_id || null, visa_file || null, req.session.user.id, req.session.user.display_name]));
     res.json({ id: r.id, num });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1978,19 +1940,8 @@ app.delete('/api/visas/:id', auth, async (req, res) => {
 
 /* ─── GROUPS ─── */
 app.get('/api/groups/next-num', auth, async (req, res) => {
-  try {
-    if (isIsolated(req.session.user.role)) {
-      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).grp;
-      const last = await queryOne('SELECT num FROM groups_trips WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
-      if (!last) return res.json({ num: prefix + '001' });
-      const m = last.num.match(/(\d+)$/);
-      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-    }
-    const last = await queryOne('SELECT num FROM groups_trips ORDER BY id DESC LIMIT 1');
-    if (!last) return res.json({ num: 'GRP-001' });
-    const m = last.num.match(/(\d+)$/);
-    res.json({ num: 'GRP-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json({ num: await computeNextNum('groups', req.session.user) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/groups', auth, async (req, res) => {
   try {
@@ -2021,10 +1972,10 @@ app.get('/api/groups/:id', auth, async (req, res) => {
 });
 app.post('/api/groups', auth, async (req, res) => {
   try {
-    const { num, name, destination, departure_date, return_date, currency, status, notes, travelers } = req.body;
-    const r = await queryOne(
+    const { name, destination, departure_date, return_date, currency, status, notes, travelers } = req.body;
+    const { num, row: r } = await withUniqueNumRetry('groups', req.session.user, null, (num) => queryOne(
       'INSERT INTO groups_trips (num,name,destination,departure_date,return_date,currency,status,notes,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, name || '', destination || '', cleanDate(departure_date) || '', cleanDate(return_date) || '', currency || 'KWD', status || 'draft', notes || '', req.session.user.id, req.session.user.display_name]);
+      [num, name || '', destination || '', cleanDate(departure_date) || '', cleanDate(return_date) || '', currency || 'KWD', status || 'draft', notes || '', req.session.user.id, req.session.user.display_name]));
     for (const t of (travelers || [])) {
       await run('INSERT INTO group_travelers (group_id,name,phone,room_no,amount,paid,notes) VALUES (?,?,?,?,?,?,?)',
         [r.id, t.name || '', t.phone || '', t.room_no || '', parseFloat(t.amount) || 0, !!t.paid, t.notes || '']);
@@ -2121,19 +2072,8 @@ app.delete('/api/passports/:id', auth, async (req, res) => {
 
 /* ─── EXPENSES ─── */
 app.get('/api/expenses/next-num', auth, async (req, res) => {
-  try {
-    if (isIsolated(req.session.user.role)) {
-      const prefix = (NUM_PREFIX[req.session.user.role] || NUM_PREFIX.demo).exp;
-      const last = await queryOne('SELECT num FROM expenses WHERE owner_id=? ORDER BY id DESC LIMIT 1', [req.session.user.id]);
-      if (!last) return res.json({ num: prefix + '001' });
-      const m = last.num.match(/(\d+)$/);
-      return res.json({ num: prefix + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-    }
-    const last = await queryOne('SELECT num FROM expenses ORDER BY id DESC LIMIT 1');
-    if (!last) return res.json({ num: 'EXP-001' });
-    const m = last.num.match(/(\d+)$/);
-    res.json({ num: 'EXP-' + String(m ? parseInt(m[1]) + 1 : 1).padStart(3, '0') });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json({ num: await computeNextNum('expenses', req.session.user) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/expenses', auth, async (req, res) => {
   try {
@@ -2156,12 +2096,12 @@ app.get('/api/expenses/:id', auth, async (req, res) => {
 });
 app.post('/api/expenses', auth, async (req, res) => {
   try {
-    const { num, date, category, vendor, description, amount, currency, payment_method, receipt } = req.body;
+    const { date, category, vendor, description, amount, currency, payment_method, receipt } = req.body;
     if (!category || !String(category).trim()) return res.status(400).json({ error: 'Category is required' });
     if (!(parseFloat(amount) > 0)) return res.status(400).json({ error: 'Amount must be greater than 0' });
-    const r = await queryOne(
+    const { num, row: r } = await withUniqueNumRetry('expenses', req.session.user, null, (num) => queryOne(
       'INSERT INTO expenses (num,date,category,vendor,description,amount,currency,payment_method,receipt,owner_id,owner_name) VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-      [num, cleanDate(date) || cleanDate(new Date().toISOString()), category.trim(), vendor || '', description || '', parseFloat(amount) || 0, currency || 'KWD', payment_method || 'Cash', receipt || null, req.session.user.id, req.session.user.display_name]);
+      [num, cleanDate(date) || cleanDate(new Date().toISOString()), category.trim(), vendor || '', description || '', parseFloat(amount) || 0, currency || 'KWD', payment_method || 'Cash', receipt || null, req.session.user.id, req.session.user.display_name]));
     res.json({ id: r.id, num });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
