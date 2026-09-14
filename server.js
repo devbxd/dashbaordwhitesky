@@ -714,14 +714,11 @@ app.get('/api/me', (req, res) => res.json({ user: req.session.user || null }));
 // own branding), seeded with sane defaults so their invoices aren't blank on day one.
 app.post('/api/signup', async (req, res) => {
   try {
-    const { username, password, display_name, company_name, client, invite_code } = req.body;
-    // Only the desktop app is allowed to self-register — the plain website never shows
-    // this option, and this check stops someone from calling the endpoint directly too.
-    if (client !== 'desktop') return res.status(403).json({ error: 'Account creation is only available from the desktop app.' });
-    // The download link itself is just a public file with no limit — anyone can share it
-    // with anyone. The real one-signup-per-person control is this code: the patron hands
-    // out one single-use invite code per prospect (separately from the download link), and
-    // it's consumed the moment an account is created with it. No valid, unused code = no signup.
+    const { username, password, display_name, company_name, invite_code } = req.body;
+    // Self-signup is open on both web and desktop — the one-signup-per-person control is
+    // this code: the patron hands out one single-use invite code per prospect (separately
+    // from the sales page link), and it's consumed the moment an account is created with
+    // it. No valid, unused code = no signup, regardless of where the form was opened.
     if (!invite_code) return res.status(400).json({ error: 'An invite code is required — ask the person who sent you this app for one.' });
     const invite = await queryOne('SELECT * FROM invites WHERE code=?', [String(invite_code).trim().toUpperCase()]);
     if (!invite) return res.status(400).json({ error: 'Invalid invite code.' });

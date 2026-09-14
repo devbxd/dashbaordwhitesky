@@ -329,13 +329,13 @@ function cacheLoginBranding(){
   }catch(e){}
 }
 applyLoginBrandingFromCache();
-// Self-signup is only offered inside the desktop app (main.js loads the page with
-// ?client=desktop) — the plain website never shows it, so a random visitor can't just
-// register themselves. The real access control is the invite code required server-side
-// (see /api/signup) — without a valid, unused code the form doesn't get anyone anywhere,
-// so the link itself can stay visible every time.
+// Self-signup is offered everywhere — web and desktop app alike. The real access control
+// is the single-use invite code required server-side (see /api/signup): without a valid,
+// unused code the form doesn't get anyone anywhere, so the "Create your account" link
+// itself is safe to show on the plain website too, letting clients who paid register
+// themselves the moment the owner hands them a code, no desktop app required.
 function signupAllowedHere(){
-  return new URLSearchParams(location.search).get('client')==='desktop';
+  return true;
 }
 async function init(){const{user}=await api('GET','/api/me');settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);if(user){currentUser=user;cacheLoginBranding();showApp();showPage('dashboard');}else{document.getElementById('login-screen').style.display='flex';if(signupAllowedHere())document.getElementById('signup-toggle-hint').classList.remove('hidden');translateNode(document.getElementById('login-screen'));}}
 document.getElementById('btn-login').addEventListener('click',doLogin);
@@ -359,7 +359,7 @@ async function doSignup(){
   const password=document.getElementById('su-pass').value;
   if(!invite_code||!display_name||!username||!password){err.textContent='Please fill in all fields';err.style.display='block';return;}
   btn.textContent='…';btn.disabled=true;
-  const data=await api('POST','/api/signup',{username,password,display_name,company_name,client:'desktop',invite_code});
+  const data=await api('POST','/api/signup',{username,password,display_name,company_name,invite_code});
   btn.textContent='Create Account';btn.disabled=false;
   if(data.success){
     currentUser=data.user;err.style.display='none';
