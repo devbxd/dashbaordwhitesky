@@ -307,13 +307,20 @@ function dl(){
 }
 
 /* AUTH */
-/* Login screen branding — only for the resold desktop build (?client=desktop): that
-   device remembers the last account that signed in on it (localStorage, per install) so
-   it shows that client's own name/logo instead of the default, from the second launch on.
-   The plain shared web URL never does this — it always shows the M&S Cyber Systems login
-   screen baked into index.html, regardless of who last logged in on that browser. */
+// True only for the resold desktop build (main.js loads the page with ?client=desktop) —
+// distinct from signupAllowedHere(), which is now true everywhere. Kept separate on
+// purpose: mixing them up once already leaked whichever account last logged in on a
+// shared browser onto the public web login screen (see isDesktopClient() below).
+function isDesktopClient(){
+  return new URLSearchParams(location.search).get('client')==='desktop';
+}
+/* Login screen branding — only for the resold desktop build: that device remembers the
+   last account that signed in on it (localStorage, per install) so it shows that client's
+   own name/logo instead of the default, from the second launch on. The plain shared web
+   URL never does this — it always shows the M&S Cyber Systems login screen baked into
+   index.html, regardless of who last logged in on that browser. */
 function applyLoginBrandingFromCache(){
-  if(!signupAllowedHere())return;
+  if(!isDesktopClient())return;
   try{
     const name=localStorage.getItem('brand_name');
     const logo=localStorage.getItem('brand_logo');
@@ -322,7 +329,7 @@ function applyLoginBrandingFromCache(){
   }catch(e){}
 }
 function cacheLoginBranding(){
-  if(!signupAllowedHere())return;
+  if(!isDesktopClient())return;
   try{
     localStorage.setItem('brand_name',settings.company_name||currentUser.display_name||'');
     if(settings.company_logo)localStorage.setItem('brand_logo',settings.company_logo);
