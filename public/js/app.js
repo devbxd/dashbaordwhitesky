@@ -279,6 +279,8 @@ function tagBadge(t){const cls={VIP:'badge-vip',New:'badge-new',Regular:'badge-r
    "services" for M&S Cyber Systems, purely as a UI relabeling (same DB columns underneath). */
 function isCyber(){return !!(currentUser&&currentUser.role==='cyber');}
 function isClient(){return !!(currentUser&&currentUser.role==='client');}
+function isRestaurant(){return !!(currentUser&&currentUser.business_type==='restaurant');}
+function homePage(){return isRestaurant()?'pos':'dashboard';}
 function dl(){
   if(isCyber())return{
     ticketsNav:'Services',newTicketNav:'New Service',ticketsTitle:'Services',newTicketTitle:'New Service',
@@ -344,10 +346,10 @@ applyLoginBrandingFromCache();
 function signupAllowedHere(){
   return true;
 }
-async function init(){const{user}=await api('GET','/api/me');settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);if(user){currentUser=user;cacheLoginBranding();showApp();showPage('dashboard');}else{document.getElementById('login-screen').style.display='flex';if(signupAllowedHere())document.getElementById('signup-toggle-hint').classList.remove('hidden');translateNode(document.getElementById('login-screen'));}}
+async function init(){const{user}=await api('GET','/api/me');settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);if(user){currentUser=user;cacheLoginBranding();showApp();showPage(homePage());}else{document.getElementById('login-screen').style.display='flex';if(signupAllowedHere())document.getElementById('signup-toggle-hint').classList.remove('hidden');translateNode(document.getElementById('login-screen'));}}
 document.getElementById('btn-login').addEventListener('click',doLogin);
 ['login-user','login-pass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();}));
-async function doLogin(){const btn=document.getElementById('btn-login');const err=document.getElementById('login-error');btn.textContent='…';btn.disabled=true;const data=await api('POST','/api/login',{username:document.getElementById('login-user').value.trim(),password:document.getElementById('login-pass').value});btn.textContent='Sign In';btn.disabled=false;if(data.success){currentUser=data.user;err.style.display='none';settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);cacheLoginBranding();await playWelcome(currentUser.display_name,currentUser.role==='cyber');showApp();showPage('dashboard');}else{err.textContent=data.error||'Invalid credentials';err.style.display='block';}}
+async function doLogin(){const btn=document.getElementById('btn-login');const err=document.getElementById('login-error');btn.textContent='…';btn.disabled=true;const data=await api('POST','/api/login',{username:document.getElementById('login-user').value.trim(),password:document.getElementById('login-pass').value});btn.textContent='Sign In';btn.disabled=false;if(data.success){currentUser=data.user;err.style.display='none';settings=await api('GET','/api/settings').catch(()=>({}));applyLanguage(settings.lang);cacheLoginBranding();await playWelcome(currentUser.display_name,currentUser.role==='cyber');showApp();showPage(homePage());}else{err.textContent=data.error||'Invalid credentials';err.style.display='block';}}
 
 function toggleAuthMode(mode){
   document.getElementById('signin-fields').classList.toggle('hidden',mode!=='signin');
@@ -373,7 +375,7 @@ async function doSignup(){
     settings=await api('GET','/api/settings').catch(()=>({}));
     applyLanguage(settings.lang);cacheLoginBranding();
     await playWelcome(currentUser.display_name,false);
-    showApp();showPage('dashboard');
+    showApp();showPage(homePage());
   }else{err.textContent=data.error||'Could not create account';err.style.display='block';}
 }
 function playWelcome(name,cyber){
@@ -395,10 +397,17 @@ function showApp(){document.getElementById('login-screen').style.display='none';
 function applyBranding(){
   const cyber=isCyber();
   const client=isClient();
+  const rest=isRestaurant();
   const brandName=cyber?'M&S Cyber Systems':(client?(settings.company_name||currentUser.display_name):'White Sky Travel');
   const bn=document.querySelector('.brand-name');if(bn)bn.textContent=brandName;
-  document.title=cyber?'M&S Cyber Systems — Invoicing':`${brandName} — Invoicing`;
-  const bi=document.querySelector('.brand-icon i');if(bi)bi.className=cyber?'ti ti-shield-lock':(client?'ti ti-building-store':'ti ti-plane');
+  document.title=cyber?'M&S Cyber Systems — Invoicing':`${brandName} — ${rest?'POS':'Invoicing'}`;
+  const bi=document.querySelector('.brand-icon i');if(bi)bi.className=cyber?'ti ti-shield-lock':(rest?'ti ti-tools-kitchen-2':(client?'ti ti-building-store':'ti ti-plane'));
+  // Restaurant accounts get their own nav (POS, Tables, Menu, Orders) instead of the
+  // travel-agency one — kept as a silent per-account switch (see /api/signup's invite_code
+  // business_type), not a public toggle anywhere in the UI.
+  document.querySelectorAll('.travel-only').forEach(el=>el.classList.toggle('hidden',rest));
+  document.querySelectorAll('.rest-only').forEach(el=>el.classList.toggle('hidden',!rest));
+  if(rest)return;
   const labels=dl();
   const tSep=document.querySelector('.nav-sep[data-sep="tickets"]');if(tSep)tSep.textContent=labels.ticketsNav;
   const tSpan=document.querySelector('.nav-item[data-page="tickets"] span');if(tSpan)tSpan.textContent=labels.ticketsNav;
@@ -427,7 +436,7 @@ const SKELETON_PAGE='<div class="skeleton-page"><div class="skeleton skeleton-bl
 // covers both the skeleton appearing and the real content replacing it, without needing
 // every one of the ~30 page*() render functions to know about the animation themselves.
 new MutationObserver(()=>{const mc=document.getElementById('main-content');mc.classList.remove('page-enter');void mc.offsetWidth;mc.classList.add('page-enter');}).observe(document.getElementById('main-content'),{childList:true});
-function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML=SKELETON_PAGE;const pages={dashboard:pageDashboard,'command-center':pageCommandCenter,clients:pageClients,catalog:pageCatalog,quotes:pageQuotes,'new-quote':pageNewQuote,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,hotels:pageHotels,'new-hotel':pageNewHotel,'hotel-vouchers':pageHotelVouchers,visas:pageVisas,'new-visa':pageNewVisa,groups:pageGroups,'new-group':pageNewGroup,passports:pagePassports,'new-passport':pageNewPassport,payments:pagePayments,receipts:pageReceipts,expenses:pageExpenses,'credit-notes':pageCreditNotes,statements:pageStatements,reports:pageReports,settings:pageSettings,admin:pageAdmin,projects:pageProjects};if(pages[page])pages[page](mc);}
+function showPage(page){document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const nav=document.querySelector(`.nav-item[data-page="${page}"]`);if(nav)nav.classList.add('active');const mc=document.getElementById('main-content');mc.innerHTML=SKELETON_PAGE;const pages={dashboard:pageDashboard,'command-center':pageCommandCenter,clients:pageClients,catalog:pageCatalog,quotes:pageQuotes,'new-quote':pageNewQuote,invoices:pageInvoices,'new-invoice':pageNewInvoice,tickets:pageTickets,'new-ticket':pageNewTicket,hotels:pageHotels,'new-hotel':pageNewHotel,'hotel-vouchers':pageHotelVouchers,visas:pageVisas,'new-visa':pageNewVisa,groups:pageGroups,'new-group':pageNewGroup,passports:pagePassports,'new-passport':pageNewPassport,payments:pagePayments,receipts:pageReceipts,expenses:pageExpenses,'credit-notes':pageCreditNotes,statements:pageStatements,reports:pageReports,settings:pageSettings,admin:pageAdmin,projects:pageProjects,pos:pagePos,'rest-orders':pageRestOrders,'rest-tables':pageRestTables,'rest-products':pageRestProducts};if(pages[page])pages[page](mc);}
 
 /* DASHBOARD */
 function deadlineWhen(days){if(days<0)return`${-days}d overdue`;if(days===0)return'Today';if(days===1)return'Tomorrow';return`in ${days}d`;}
@@ -1621,6 +1630,7 @@ async function deleteProject(id){
 async function pageAdmin(mc){
   const[users,invites]=await Promise.all([api('GET','/api/users'),api('GET','/api/invites')]);
   const roleLabel={patron:'Owner',employe:'Staff',demo:'User (Demo)',cyber:'Owner (Cyber)',client:'User (Client)'};
+  const typeLabel={travel:'Travel Agency',restaurant:'Restaurant'};
   mc.innerHTML=`
 <div class="page-header"><div><div class="page-title">Admin</div><div class="page-sub">Sales page link, invite codes and account access — visible to the owner only</div></div></div>
 <div class="card" style="max-width:680px"><div class="card-header"><span class="card-title"><i class="ti ti-download" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>Sales Page Link</span></div>
@@ -1630,9 +1640,9 @@ async function pageAdmin(mc){
     <button class="btn-secondary" onclick="copyDownloadLink()"><i class="ti ti-copy"></i> Copy link</button>
   </div>
 </div>
-<div class="card" style="max-width:680px"><div class="card-header"><span class="card-title"><i class="ti ti-key" style="vertical-align:-2px;margin-right:6px;color:#b8860b"></i>Invite Codes</span><button class="btn-new" onclick="generateInvite()"><i class="ti ti-plus"></i> Generate Code</button></div>
-  <p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">This is the actual access control — give one code per prospect (WhatsApp, etc.), separately from the download link. Each code creates exactly one account, then it's dead.</p>
-  ${invites.length===0?`<div class="empty-state" style="padding:2rem"><i class="ti ti-key"></i><h3>No codes generated yet</h3></div>`:`<table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Code</th><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Status</th><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Used by</th><th></th></tr></thead><tbody>${invites.map(inv=>`<tr><td style="padding:6px 4px;font-family:monospace;font-weight:700">${inv.code}</td><td style="padding:6px 4px">${inv.used?'<span class="badge badge-draft">Used</span>':'<span class="badge badge-paid">Unused</span>'}</td><td style="padding:6px 4px;color:#888;font-size:12px">${inv.used_by_name||'—'}</td><td style="padding:6px 4px;text-align:right">${inv.used?'':`<button class="action-btn" onclick="copyInviteCode('${inv.code}')" title="Copy"><i class="ti ti-copy"></i></button><button class="action-btn danger" onclick="deleteInvite('${inv.code}')" title="Revoke"><i class="ti ti-trash"></i></button>`}</td></tr>`).join('')}</tbody></table>`}
+<div class="card" style="max-width:680px"><div class="card-header"><span class="card-title"><i class="ti ti-key" style="vertical-align:-2px;margin-right:6px;color:#b8860b"></i>Invite Codes</span><div style="display:flex;gap:8px"><button class="btn-new" onclick="generateInvite('travel')"><i class="ti ti-plus"></i> Generate Travel Agency Code</button><button class="btn-new" onclick="generateInvite('restaurant')"><i class="ti ti-plus"></i> Generate Restaurant Code</button></div></div>
+  <p style="font-size:13px;color:#888;margin-bottom:1rem;line-height:1.6">This is the actual access control — give one code per prospect (WhatsApp, etc.), separately from the download link. Each code creates exactly one account, then it's dead. The type picked here silently decides which dashboard (travel agency or restaurant POS) that account gets — nothing about it shows up anywhere public.</p>
+  ${invites.length===0?`<div class="empty-state" style="padding:2rem"><i class="ti ti-key"></i><h3>No codes generated yet</h3></div>`:`<table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Code</th><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Type</th><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Status</th><th style="text-align:left;font-size:11px;color:#888;padding:6px 4px">Used by</th><th></th></tr></thead><tbody>${invites.map(inv=>`<tr><td style="padding:6px 4px;font-family:monospace;font-weight:700">${inv.code}</td><td style="padding:6px 4px;color:#888;font-size:12px">${typeLabel[inv.business_type]||'Travel Agency'}</td><td style="padding:6px 4px">${inv.used?'<span class="badge badge-draft">Used</span>':'<span class="badge badge-paid">Unused</span>'}</td><td style="padding:6px 4px;color:#888;font-size:12px">${inv.used_by_name||'—'}</td><td style="padding:6px 4px;text-align:right">${inv.used?'':`<button class="action-btn" onclick="copyInviteCode('${inv.code}')" title="Copy"><i class="ti ti-copy"></i></button><button class="action-btn danger" onclick="deleteInvite('${inv.code}')" title="Revoke"><i class="ti ti-trash"></i></button>`}</td></tr>`).join('')}</tbody></table>`}
 </div>
 <div class="card" style="max-width:680px;padding:0;overflow:hidden"><div class="card-header" style="padding:1.25rem 1.25rem 0"><span class="card-title"><i class="ti ti-users-group" style="vertical-align:-2px;margin-right:6px;color:#1A6FB5"></i>All Accounts</span></div>
 <div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>${users.map(u=>`<tr><td style="font-weight:700">${u.display_name}</td><td style="color:#888">${u.username}</td><td>${roleLabel[u.role]||u.role}</td><td>${u.active===false?'<span class="badge badge-refused">Deactivated</span>':'<span class="badge badge-paid">Active</span>'}</td><td class="actions-cell">${u.id===currentUser.id?'<span style="color:#ccc;font-size:12px">(you)</span>':u.active===false?`<button class="btn-secondary" style="font-size:11px;padding:4px 8px;color:#1a7a3a;border-color:#a3d9b1" onclick="toggleUserActive(${u.id},true)"><i class="ti ti-check"></i> Activate</button>`:`<button class="btn-secondary" style="font-size:11px;padding:4px 8px;color:#c0392b;border-color:#f5c6c6" onclick="toggleUserActive(${u.id},false)"><i class="ti ti-ban"></i> Deactivate</button>`}</td></tr>`).join('')}</tbody></table></div></div>`;
@@ -1644,8 +1654,8 @@ async function toggleUserActive(id,active){
   toast(active?'✅ Account activated':'Account deactivated','success');
   showPage('admin');
 }
-async function generateInvite(){
-  const r=await api('POST','/api/invites',{});
+async function generateInvite(businessType){
+  const r=await api('POST','/api/invites',{business_type:businessType||'travel'});
   if(r&&r.error){toast(r.error,'error');return;}
   showPage('admin');
   setTimeout(()=>{navigator.clipboard.writeText(r.code).catch(()=>{});toast(`✅ Code ${r.code} generated and copied`,'success');},150);
@@ -1897,6 +1907,192 @@ async function savePdfInvoice() {
 
 
 
+
+/* ─── RESTAURANT POS ─────────────────────────────────────────────────── */
+let allRestTables=[],allRestProducts=[],allRestOrders=[],currentPosOrder=null;
+
+async function pagePos(mc){
+  const[tables,orders]=await Promise.all([api('GET','/api/rest/tables'),api('GET','/api/rest/orders')]);
+  allRestTables=tables;
+  const active=orders.filter(o=>o.status==='open'||o.status==='sent_kitchen');
+  const activeByTable={};active.forEach(o=>{if(o.table_id)activeByTable[o.table_id]=o;});
+  const walkins=active.filter(o=>!o.table_id);
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">POS</div><div class="page-sub">Tap a table to open its order, or start a walk-in order</div></div><button class="btn-new" onclick="startWalkinOrder()"><i class="ti ti-plus"></i> Walk-in / Quick Order</button></div>
+${walkins.length?`<div class="card"><div class="card-header"><span class="card-title">Open walk-in orders</span></div><div style="display:flex;flex-wrap:wrap;gap:10px">${walkins.map(o=>`<div class="action-btn" style="width:auto;height:auto;padding:10px 16px;border-radius:10px;cursor:pointer;background:#fff4e0;border-color:#f0c674" onclick="openRestOrder(${o.id})"><div style="font-weight:700">${o.num}</div><div style="font-size:11px;color:#a05c00">${o.status==='sent_kitchen'?'In kitchen':'Open'}</div></div>`).join('')}</div></div>`:''}
+<div class="card"><div class="card-header"><span class="card-title">Tables</span></div>
+${tables.length===0?`<div class="empty-state"><i class="ti ti-layout-grid"></i><h3>No tables yet</h3><p>Add tables from the Tables page.</p><button class="btn-new" style="margin-top:1rem" onclick="showPage('rest-tables')"><i class="ti ti-plus"></i> Manage Tables</button></div>`:
+`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px">${tables.map(t=>{const o=activeByTable[t.id];const occ=!!o;return `<div onclick="${occ?`openRestOrder(${o.id})`:`startTableOrder(${t.id},'${(t.name||'').replace(/'/g,"\\'")}')`}" style="cursor:pointer;border-radius:12px;padding:16px 10px;text-align:center;border:2px solid ${occ?'#e8a33d':'#dfe7f0'};background:${occ?'#fff8ec':'#f7faff'}">
+  <i class="ti ti-tools-kitchen-2" style="font-size:22px;color:${occ?'#a05c00':'#1A6FB5'}"></i>
+  <div style="font-weight:700;margin-top:6px">${t.name}</div>
+  <div style="font-size:11px;color:${occ?'#a05c00':'#888'}">${occ?(o.status==='sent_kitchen'?'In kitchen':'Occupied'):`${t.seats||2} seats — Free`}</div>
+</div>`;}).join('')}</div>`}
+</div>`;
+}
+async function startTableOrder(tableId,tableName){
+  const order=await api('POST','/api/rest/orders',{table_id:tableId,table_name:tableName});
+  if(order&&order.error){toast(order.error,'error');return;}
+  openRestOrder(order.id);
+}
+async function startWalkinOrder(){
+  const order=await api('POST','/api/rest/orders',{});
+  if(order&&order.error){toast(order.error,'error');return;}
+  openRestOrder(order.id);
+}
+async function openRestOrder(id){
+  if(!allRestProducts.length)allRestProducts=await api('GET','/api/rest/products');
+  const order=await api('GET',`/api/rest/orders/${id}`);
+  if(order&&order.error){toast(order.error,'error');showPage('pos');return;}
+  currentPosOrder=order;
+  renderPosOrder(order);
+}
+function renderPosOrder(order){
+  const mc=document.getElementById('main-content');
+  const editable=order.status==='open'||order.status==='sent_kitchen';
+  const cats={};allRestProducts.filter(p=>p.active!==false).forEach(p=>{const c=p.category||'Other';(cats[c]=cats[c]||[]).push(p);});
+  const catHtml=Object.keys(cats).sort().map(c=>`<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">${c}</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px">${cats[c].map(p=>`<button class="btn-secondary" style="text-align:left;padding:10px" onclick="addRestOrderItem(${p.id})"><div style="font-weight:700;font-size:12.5px">${p.name}</div><div style="font-size:11px;color:#888">${fmt(p.price,p.currency)}</div></button>`).join('')}</div></div>`).join('');
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">${order.num}</div><div class="page-sub">${order.table_name||'Walk-in'} — ${restStatusBadge(order.status)}</div></div>
+<div class="header-actions">
+  <button class="btn-secondary" onclick="showPage('pos')"><i class="ti ti-arrow-left"></i> Back</button>
+  ${editable?`<button class="btn-secondary" onclick="printRestKitchenTicket(currentPosOrder)"><i class="ti ti-printer"></i> Send to Kitchen</button>`:''}
+  ${editable?`<button class="btn-new" onclick="openRestPayModal()"><i class="ti ti-cash"></i> Close &amp; Pay</button>`:''}
+  ${order.status==='paid'?`<button class="btn-secondary" onclick="printRestReceipt(currentPosOrder)"><i class="ti ti-printer"></i> Reprint Receipt</button>`:''}
+  ${editable?`<button class="btn-secondary" style="color:#c0392b;border-color:#f5c6c6" onclick="cancelRestOrder(${order.id})"><i class="ti ti-x"></i> Cancel Order</button>`:''}
+</div></div>
+<div style="display:grid;grid-template-columns:1.3fr 1fr;gap:1rem;align-items:start">
+  <div class="card">${editable?catHtml||`<div class="empty-state"><i class="ti ti-tag"></i><h3>No menu items yet</h3><p>Add products from the Menu page.</p></div>`:'<div style="color:#aaa;font-size:13px">This order is closed.</div>'}</div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Order</span></div>
+    <div id="pos-cart">${(order.items||[]).length===0?`<div class="empty-state" style="padding:1.5rem"><i class="ti ti-shopping-cart"></i><h3>No items yet</h3></div>`:order.items.map(it=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #f0f3f8">
+      <div><div style="font-weight:700;font-size:13px">${it.product_name}</div><div style="font-size:11px;color:#888">${fmt(it.unit_price,order.currency)} × ${it.qty}</div></div>
+      ${editable?`<div style="display:flex;align-items:center;gap:6px"><button class="action-btn" onclick="changeRestItemQty(${it.id},${it.qty-1})"><i class="ti ti-minus"></i></button><span style="min-width:18px;text-align:center;font-weight:700">${it.qty}</span><button class="action-btn" onclick="changeRestItemQty(${it.id},${it.qty+1})"><i class="ti ti-plus"></i></button><button class="action-btn danger" onclick="removeRestItem(${it.id})"><i class="ti ti-trash"></i></button></div>`:`<div style="font-weight:700">${fmt(it.qty*it.unit_price,order.currency)}</div>`}
+    </div>`).join('')}</div>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:#888;padding:3px 0"><span>Subtotal</span><span>${fmt(order.subtotal,order.currency)}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:#888;padding:3px 0"><span>Tax / service</span><span>${fmt(order.tax,order.currency)}</span></div>
+      <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;padding:6px 0"><span>Total</span><span>${fmt(order.total,order.currency)}</span></div>
+    </div>
+  </div>
+</div>`;
+}
+function restStatusBadge(s){
+  const map={open:'badge-draft',sent_kitchen:'badge-pending',paid:'badge-paid',cancelled:'badge-refused'};
+  const label={open:'Open',sent_kitchen:'In kitchen',paid:'Paid',cancelled:'Cancelled'};
+  return `<span class="badge ${map[s]||'badge-draft'}">${label[s]||s}</span>`;
+}
+async function addRestOrderItem(productId){
+  const order=await api('POST',`/api/rest/orders/${currentPosOrder.id}/items`,{product_id:productId,qty:1});
+  if(order&&order.error){toast(order.error,'error');return;}
+  currentPosOrder=order;renderPosOrder(order);
+}
+async function changeRestItemQty(itemId,qty){
+  if(qty<=0)return removeRestItem(itemId);
+  const order=await api('PUT',`/api/rest/orders/${currentPosOrder.id}/items/${itemId}`,{qty});
+  if(order&&order.error){toast(order.error,'error');return;}
+  currentPosOrder=order;renderPosOrder(order);
+}
+async function removeRestItem(itemId){
+  const order=await api('DELETE',`/api/rest/orders/${currentPosOrder.id}/items/${itemId}`);
+  if(order&&order.error){toast(order.error,'error');return;}
+  currentPosOrder=order;renderPosOrder(order);
+}
+async function cancelRestOrder(id){
+  if(!await confirmDialog('This order will be cancelled and its table freed.',{title:'Cancel this order?'}))return;
+  await api('PUT',`/api/rest/orders/${id}`,{status:'cancelled'});
+  toast('Order cancelled');showPage('pos');
+}
+function openRestPayModal(){
+  document.getElementById('rp-order-num').textContent=currentPosOrder.num;
+  document.getElementById('rp-order-total').textContent=fmt(currentPosOrder.total,currentPosOrder.currency);
+  document.getElementById('rp-order-tax').value=currentPosOrder.tax||0;
+  document.getElementById('rp-order-method').value='Cash';
+  openModal('modal-rest-pay');
+}
+document.getElementById('btn-confirm-rest-pay').addEventListener('click',async()=>{
+  const tax=parseFloat(document.getElementById('rp-order-tax').value)||0;
+  const payment_method=document.getElementById('rp-order-method').value;
+  const order=await api('POST',`/api/rest/orders/${currentPosOrder.id}/pay`,{tax,payment_method});
+  if(order&&order.error){toast(order.error,'error');return;}
+  currentPosOrder=order;closeModal('modal-rest-pay');
+  toast('✅ Order paid','success');
+  printRestReceipt(order);
+  renderPosOrder(order);
+});
+function printRestKitchenTicket(order){
+  api('POST',`/api/rest/orders/${order.id}/send-kitchen`,{}).then(o=>{
+    if(o&&o.error){toast(o.error,'error');return;}
+    currentPosOrder=o;
+    const items=(o.items||[]).map(it=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed #ccc"><span>${it.qty} × ${it.product_name}</span></div>`).join('');
+    const doc=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Kitchen Ticket</title><style>
+body{font-family:'Segoe UI',Arial,sans-serif;width:280px;margin:0 auto;padding:16px;font-size:13px}
+h2{text-align:center;margin:0 0 4px;font-size:16px}
+.meta{text-align:center;color:#555;font-size:11px;margin-bottom:12px}
+@media print{@page{margin:6mm}}
+</style></head><body><h2>KITCHEN</h2><div class="meta">${o.num} — ${o.table_name||'Walk-in'}<br>${new Date().toLocaleString()}</div>${items}${o.notes?`<div style="margin-top:10px;font-style:italic">Note: ${o.notes}</div>`:''}<script>window.onload=()=>window.print()<\/script></body></html>`;
+    outputDoc(doc,`${o.num}-kitchen.pdf`);
+    renderPosOrder(o);
+    toast('Sent to kitchen','success');
+  });
+}
+function printRestReceipt(order){
+  const s=settings;
+  const items=(order.items||[]).map(it=>`<tr><td>${it.qty} × ${it.product_name}</td><td style="text-align:right">${fmt(it.qty*it.unit_price,order.currency)}</td></tr>`).join('');
+  const doc=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt</title><style>
+body{font-family:'Segoe UI',Arial,sans-serif;width:280px;margin:0 auto;padding:16px;font-size:12.5px;color:#1a1a2e}
+h2{text-align:center;margin:0 0 2px}
+.meta{text-align:center;color:#666;font-size:11px;margin-bottom:10px}
+table{width:100%;border-collapse:collapse}
+td{padding:3px 0}
+.totals{margin-top:8px;border-top:1px dashed #999;padding-top:6px}
+.totals div{display:flex;justify-content:space-between;padding:2px 0}
+.grand{font-weight:800;font-size:14px;border-top:1px solid #333;margin-top:4px;padding-top:6px}
+.foot{text-align:center;margin-top:14px;font-size:10.5px;color:#888}
+@media print{@page{margin:6mm}}
+</style></head><body>
+<h2>${s.company_name||'Receipt'}</h2>
+<div class="meta">${order.num} — ${order.table_name||'Walk-in'}<br>${new Date(order.paid_at||Date.now()).toLocaleString()}</div>
+<table>${items}</table>
+<div class="totals">
+  <div><span>Subtotal</span><span>${fmt(order.subtotal,order.currency)}</span></div>
+  <div><span>Tax / service</span><span>${fmt(order.tax,order.currency)}</span></div>
+  <div class="grand"><span>TOTAL</span><span>${fmt(order.total,order.currency)}</span></div>
+  <div style="margin-top:4px"><span>Paid via</span><span>${order.payment_method||'—'}</span></div>
+</div>
+<div class="foot">${(s.invoice_footer||'Thank you!').replace(/\n/g,'<br>')}</div>
+<script>window.onload=()=>window.print()<\/script></body></html>`;
+  outputDoc(doc,`${order.num}.pdf`);
+}
+
+async function pageRestTables(mc){
+  allRestTables=await api('GET','/api/rest/tables');
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">Tables</div><div class="page-sub">${allRestTables.length} table(s)</div></div><button class="btn-new" onclick="openRestTableModal()"><i class="ti ti-plus"></i> New Table</button></div>
+<div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Seats</th><th>Status</th><th>Actions</th></tr></thead><tbody>${allRestTables.length===0?`<tr><td colspan="4"><div class="empty-state"><i class="ti ti-layout-grid"></i><h3>No tables yet</h3></div></td></tr>`:allRestTables.map(t=>`<tr><td style="font-weight:700">${t.name}</td><td>${t.seats||2}</td><td>${t.status==='occupied'?'<span class="badge badge-pending">Occupied</span>':'<span class="badge badge-paid">Free</span>'}</td><td class="actions-cell"><button class="action-btn edit" onclick="openRestTableModal(${t.id})"><i class="ti ti-edit"></i></button><button class="action-btn danger" onclick="deleteRestTable(${t.id})"><i class="ti ti-trash"></i></button></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+function openRestTableModal(id){const t=id?allRestTables.find(x=>x.id===id):null;document.getElementById('modal-rest-table-title').textContent=t?'Edit Table':'New Table';document.getElementById('edit-rt-id').value=t?t.id:'';document.getElementById('rt-name').value=t?.name||'';document.getElementById('rt-seats').value=t?.seats||2;openModal('modal-rest-table');}
+document.getElementById('btn-save-rest-table').addEventListener('click',async()=>{const name=document.getElementById('rt-name').value.trim();if(!name){toast('Table name is required','error');return;}const id=document.getElementById('edit-rt-id').value;const body={name,seats:parseInt(document.getElementById('rt-seats').value)||2};const r=id?await api('PUT',`/api/rest/tables/${id}`,body):await api('POST','/api/rest/tables',body);if(r&&r.error){toast(r.error,'error');return;}toast(id?'✅ Table updated':'✅ Table added','success');closeModal('modal-rest-table');showPage('rest-tables');});
+async function deleteRestTable(id){if(!await confirmDialog('Delete this table?'))return;await api('DELETE',`/api/rest/tables/${id}`);toast('Table deleted');showPage('rest-tables');}
+
+async function pageRestProducts(mc){
+  allRestProducts=await api('GET','/api/rest/products');
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">Menu</div><div class="page-sub">${allRestProducts.length} item(s)</div></div><button class="btn-new" onclick="openRestProductModal()"><i class="ti ti-plus"></i> New Item</button></div>
+<div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Actions</th></tr></thead><tbody>${allRestProducts.length===0?`<tr><td colspan="4"><div class="empty-state"><i class="ti ti-tag"></i><h3>No menu items yet</h3></div></td></tr>`:allRestProducts.map(p=>`<tr><td style="font-weight:700">${p.name}</td><td style="color:#888">${p.category||'—'}</td><td style="font-weight:700">${fmt(p.price,p.currency)}</td><td class="actions-cell"><button class="action-btn edit" onclick="openRestProductModal(${p.id})"><i class="ti ti-edit"></i></button><button class="action-btn danger" onclick="deleteRestProduct(${p.id})"><i class="ti ti-trash"></i></button></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+function openRestProductModal(id){const p=id?allRestProducts.find(x=>x.id===id):null;document.getElementById('modal-rest-product-title').textContent=p?'Edit Menu Item':'New Menu Item';document.getElementById('edit-rp-id').value=p?p.id:'';document.getElementById('rp-name').value=p?.name||'';document.getElementById('rp-category').value=p?.category||'';document.getElementById('rp-price').value=p?.price||0;document.getElementById('rp-currency').value=p?.currency||settings.invoice_currency||'USD';openModal('modal-rest-product');}
+document.getElementById('btn-save-rest-product').addEventListener('click',async()=>{const name=document.getElementById('rp-name').value.trim();if(!name){toast('Name is required','error');return;}const id=document.getElementById('edit-rp-id').value;const body={name,category:document.getElementById('rp-category').value.trim(),price:document.getElementById('rp-price').value||0,currency:document.getElementById('rp-currency').value};const r=id?await api('PUT',`/api/rest/products/${id}`,body):await api('POST','/api/rest/products',body);if(r&&r.error){toast(r.error,'error');return;}toast(id?'✅ Item updated':'✅ Item added','success');closeModal('modal-rest-product');showPage('rest-products');});
+async function deleteRestProduct(id){if(!await confirmDialog('Delete this menu item?'))return;await api('DELETE',`/api/rest/products/${id}`);toast('Item deleted');showPage('rest-products');}
+
+async function pageRestOrders(mc){
+  allRestOrders=await api('GET','/api/rest/orders');
+  mc.innerHTML=`
+<div class="page-header"><div><div class="page-title">Orders</div><div class="page-sub">${allRestOrders.length} order(s)</div></div></div>
+<div class="filter-bar"><select id="ro-s" onchange="filterRestOrders()"><option value="">All statuses</option><option value="open">Open</option><option value="sent_kitchen">In kitchen</option><option value="paid">Paid</option><option value="cancelled">Cancelled</option></select></div>
+<div class="card" style="padding:0;overflow:hidden"><div class="table-wrap"><table><thead><tr><th>#</th><th>Table</th><th>Status</th><th>Total</th><th>Created</th></tr></thead><tbody id="ro-tbody">${restOrderRowsHtml(allRestOrders)}</tbody></table></div></div>`;
+}
+function restOrderRowsHtml(list){if(!list.length)return`<tr><td colspan="5"><div class="empty-state"><i class="ti ti-receipt"></i><h3>No orders</h3></div></td></tr>`;return list.map(o=>`<tr><td style="font-weight:700;cursor:pointer;color:#1A6FB5" onclick="openRestOrder(${o.id})">${o.num}</td><td>${o.table_name||'Walk-in'}</td><td>${restStatusBadge(o.status)}</td><td style="font-weight:700">${fmt(o.total,o.currency)}</td><td style="color:#aaa;font-size:12px">${o.created_at||'—'}</td></tr>`).join('');}
+function filterRestOrders(){const s=document.getElementById('ro-s')?.value||'';const f=allRestOrders.filter(o=>!s||o.status===s);const tb=document.getElementById('ro-tbody');if(tb)tb.innerHTML=restOrderRowsHtml(f);}
 
 /* KEYBOARD */
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.modal-bg:not(.hidden)').forEach(m=>m.classList.add('hidden'));});
