@@ -81,9 +81,9 @@ function settingsPrefix(user) {
   return '';
 }
 const NUM_PREFIX = {
-  cyber: { inv: 'MSC-', tkt: 'MSC-SVC-', qte: 'MSC-QTE-', cn: 'MSC-CN-', htl: 'MSC-HTL-', visa: 'MSC-VISA-', grp: 'MSC-GRP-', exp: 'MSC-EXP-', rst: 'MSC-POS-' },
-  demo: { inv: 'DEMO-', tkt: 'DEMO-TKT-', qte: 'DEMO-QTE-', cn: 'DEMO-CN-', htl: 'DEMO-HTL-', visa: 'DEMO-VISA-', grp: 'DEMO-GRP-', exp: 'DEMO-EXP-', rst: 'DEMO-POS-' },
-  client: { inv: 'INV-', tkt: 'TKT-', qte: 'QTE-', cn: 'CN-', htl: 'HTL-', visa: 'VISA-', grp: 'GRP-', exp: 'EXP-', rst: 'POS-' },
+  cyber: { inv: 'MSC-', tkt: 'MSC-SVC-', qte: 'MSC-QTE-', cn: 'MSC-CN-', htl: 'MSC-HTL-', visa: 'MSC-VISA-', grp: 'MSC-GRP-', exp: 'MSC-EXP-' },
+  demo: { inv: 'DEMO-', tkt: 'DEMO-TKT-', qte: 'DEMO-QTE-', cn: 'DEMO-CN-', htl: 'DEMO-HTL-', visa: 'DEMO-VISA-', grp: 'DEMO-GRP-', exp: 'DEMO-EXP-' },
+  client: { inv: 'INV-', tkt: 'TKT-', qte: 'QTE-', cn: 'CN-', htl: 'HTL-', visa: 'VISA-', grp: 'GRP-', exp: 'EXP-' },
 };
 
 // Two people creating an invoice/quote in the same second both see the same "next number"
@@ -100,7 +100,6 @@ const NUM_RESOURCE = {
   visas: { table: 'visas', key: 'visa', default: 'VISA-' },
   'credit-notes': { table: 'credit_notes', key: 'cn', default: 'CN-' },
   expenses: { table: 'expenses', key: 'exp', default: 'EXP-' },
-  'rest-orders': { table: 'rest_orders', key: 'rst', default: 'POS-' },
 };
 // A saved company (client_id set from the dropdown) gets its own invoice sequence that keeps
 // counting up no matter what other invoices (other companies or walk-ins) happen in between.
@@ -596,60 +595,6 @@ async function initDB() {
     console.log('✅  M&S Cyber Systems account created — username: boudy');
   }
 
-  // Restaurant POS: a signup can be flagged 'restaurant' (via its invite code) instead of
-  // the default 'travel' agency mode — stored on the invite so it can carry through to the
-  // account it creates, and on the user itself so every later request/session knows which
-  // dashboard to serve.
-  await pool.query(`ALTER TABLE invites ADD COLUMN IF NOT EXISTS business_type TEXT DEFAULT 'travel'`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS business_type TEXT DEFAULT 'travel'`);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS rest_tables (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      seats INTEGER DEFAULT 2,
-      status TEXT DEFAULT 'free',
-      owner_id INTEGER,
-      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
-    );
-    CREATE TABLE IF NOT EXISTS rest_products (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      category TEXT,
-      price REAL DEFAULT 0,
-      currency TEXT DEFAULT 'USD',
-      active BOOLEAN DEFAULT true,
-      owner_id INTEGER,
-      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
-    );
-    CREATE TABLE IF NOT EXISTS rest_orders (
-      id SERIAL PRIMARY KEY,
-      num TEXT UNIQUE NOT NULL,
-      table_id INTEGER,
-      table_name TEXT,
-      status TEXT DEFAULT 'open',
-      subtotal REAL DEFAULT 0,
-      tax REAL DEFAULT 0,
-      total REAL DEFAULT 0,
-      currency TEXT DEFAULT 'USD',
-      payment_method TEXT,
-      notes TEXT,
-      owner_id INTEGER,
-      owner_name TEXT,
-      created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
-      paid_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS rest_order_items (
-      id SERIAL PRIMARY KEY,
-      order_id INTEGER NOT NULL,
-      product_id INTEGER,
-      product_name TEXT,
-      qty INTEGER DEFAULT 1,
-      unit_price REAL DEFAULT 0,
-      notes TEXT,
-      kitchen_status TEXT DEFAULT 'pending'
-    );
-  `);
-
   console.log('✅  Base de données PostgreSQL prête');
 }
 
@@ -739,12 +684,6 @@ async function cyberOnly(req, res, next) {
   if (!req.session.user || req.session.user.role !== 'cyber') return res.status(403).json({ error: 'Réservé au compte Cyber' });
   next();
 }
-// Restaurant POS endpoints reuse the same per-owner isolation as clients/tickets/items — no
-// separate role, just the existing isolated-tenant scoping applied to the new rest_* tables.
-function isolatedOnly(req, res, next) {
-  if (!isIsolated(req.session.user.role)) return res.status(403).json({ error: 'Not available for this account' });
-  next();
-}
 
 // One-click entry point for the sales page's "Try the live demo" button — signs the visitor
 // straight into the isolated 'test' sandbox account with no form to fill in. Safe to leave
@@ -763,7 +702,7 @@ app.post('/api/login', async (req, res) => {
     const u = await queryOne('SELECT * FROM users WHERE username=?', [req.body.username]);
     if (!u || !bcrypt.compareSync(req.body.password, u.password)) return res.json({ success: false, error: 'Identifiants incorrects' });
     if (u.active === false) return res.json({ success: false, error: 'Your account is not available. Contact +961 71 335 614 on WhatsApp.' });
-    req.session.user = { id: u.id, username: u.username, role: u.role, display_name: u.display_name, business_type: u.business_type || 'travel' };
+    req.session.user = { id: u.id, username: u.username, role: u.role, display_name: u.display_name };
     res.json({ success: true, user: req.session.user });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -789,17 +728,12 @@ app.post('/api/signup', async (req, res) => {
     const existing = await queryOne('SELECT id FROM users WHERE username=?', [username]);
     if (existing) return res.status(400).json({ error: 'That username is already taken' });
 
-    const businessType = invite.business_type === 'restaurant' ? 'restaurant' : 'travel';
-    const r = await queryOne('INSERT INTO users (username,password,role,display_name,business_type) VALUES (?,?,?,?,?) RETURNING id',
-      [username, bcrypt.hashSync(password, 10), 'client', display_name, businessType]);
+    const r = await queryOne('INSERT INTO users (username,password,role,display_name) VALUES (?,?,?,?) RETURNING id',
+      [username, bcrypt.hashSync(password, 10), 'client', display_name]);
     await run('UPDATE invites SET used=true, used_by=?, used_at=? WHERE code=?',
       [r.id, new Date().toISOString(), invite.code]);
     const prefix = `client${r.id}_`;
-    const seed = businessType === 'restaurant' ? {
-      company_name: company_name || display_name,
-      invoice_currency: 'USD',
-      invoice_footer: `Thank you for dining with ${company_name || display_name}.`,
-    } : {
+    const seed = {
       company_name: company_name || display_name,
       invoice_currency: 'KWD',
       invoice_due_days: '7',
@@ -808,7 +742,7 @@ app.post('/api/signup', async (req, res) => {
     for (const [k, v] of Object.entries(seed)) {
       await pool.query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING', [prefix + k, v]);
     }
-    req.session.user = { id: r.id, username, role: 'client', display_name, business_type: businessType };
+    req.session.user = { id: r.id, username, role: 'client', display_name };
     res.json({ success: true, user: req.session.user });
   } catch (e) {
     if (String(e.message).toLowerCase().includes('duplicate')) return res.status(400).json({ error: 'That username is already taken' });
@@ -2634,211 +2568,13 @@ app.get('/api/invites', patronOrCyber, async (req, res) => {
 app.post('/api/invites', patronOrCyber, async (req, res) => {
   try {
     const code = crypto.randomBytes(4).toString('hex').toUpperCase();
-    const businessType = req.body && req.body.business_type === 'restaurant' ? 'restaurant' : 'travel';
-    await run('INSERT INTO invites (code,created_by,business_type) VALUES (?,?,?)', [code, req.session.user.id, businessType]);
-    res.json({ code, business_type: businessType });
+    await run('INSERT INTO invites (code,created_by) VALUES (?,?)', [code, req.session.user.id]);
+    res.json({ code });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.delete('/api/invites/:code', patronOrCyber, async (req, res) => {
   try { await run('DELETE FROM invites WHERE code=? AND used=false', [req.params.code]); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-/* ─── RESTAURANT POS — tables, menu, orders, kitchen tickets, receipts ───
-   A 'client' account signed up with a restaurant invite code (business_type='restaurant')
-   gets this whole module instead of the travel-agency one. Same owner_id isolation as every
-   other isolated tenant resource, so it's plain code re-use, not a new security model. */
-app.get('/api/rest/tables', auth, isolatedOnly, async (req, res) => {
-  try { res.json(await query('SELECT * FROM rest_tables WHERE owner_id=? ORDER BY name', [req.session.user.id])); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.post('/api/rest/tables', auth, isolatedOnly, async (req, res) => {
-  try {
-    const { name, seats } = req.body;
-    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Table name is required' });
-    const r = await queryOne('INSERT INTO rest_tables (name,seats,owner_id) VALUES (?,?,?) RETURNING id',
-      [String(name).trim(), seats || 2, req.session.user.id]);
-    res.json({ id: r.id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.put('/api/rest/tables/:id', auth, isolatedOnly, async (req, res) => {
-  try {
-    const t = await queryOne('SELECT owner_id FROM rest_tables WHERE id=?', [req.params.id]);
-    if (!t || t.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
-    const { name, seats, status } = req.body;
-    await run('UPDATE rest_tables SET name=COALESCE(?,name),seats=COALESCE(?,seats),status=COALESCE(?,status) WHERE id=?',
-      [name || null, seats || null, status || null, req.params.id]);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.delete('/api/rest/tables/:id', auth, isolatedOnly, async (req, res) => {
-  try {
-    const t = await queryOne('SELECT owner_id FROM rest_tables WHERE id=?', [req.params.id]);
-    if (!t || t.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
-    await run('DELETE FROM rest_tables WHERE id=?', [req.params.id]);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/rest/products', auth, isolatedOnly, async (req, res) => {
-  try { res.json(await query('SELECT * FROM rest_products WHERE owner_id=? ORDER BY category NULLS LAST, name', [req.session.user.id])); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.post('/api/rest/products', auth, isolatedOnly, async (req, res) => {
-  try {
-    const { name, category, price, currency } = req.body;
-    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Name is required' });
-    const r = await queryOne('INSERT INTO rest_products (name,category,price,currency,owner_id) VALUES (?,?,?,?,?) RETURNING id',
-      [String(name).trim(), category || '', price || 0, currency || 'USD', req.session.user.id]);
-    res.json({ id: r.id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.put('/api/rest/products/:id', auth, isolatedOnly, async (req, res) => {
-  try {
-    const p = await queryOne('SELECT owner_id FROM rest_products WHERE id=?', [req.params.id]);
-    if (!p || p.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
-    const { name, category, price, currency, active } = req.body;
-    await run('UPDATE rest_products SET name=?,category=?,price=?,currency=?,active=? WHERE id=?',
-      [name, category || '', price || 0, currency || 'USD', active !== false, req.params.id]);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.delete('/api/rest/products/:id', auth, isolatedOnly, async (req, res) => {
-  try {
-    const p = await queryOne('SELECT owner_id FROM rest_products WHERE id=?', [req.params.id]);
-    if (!p || p.owner_id !== req.session.user.id) return res.status(403).json({ error: 'Access denied' });
-    await run('DELETE FROM rest_products WHERE id=?', [req.params.id]);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-async function recomputeRestOrderTotals(orderId) {
-  const rows = await query('SELECT qty,unit_price FROM rest_order_items WHERE order_id=?', [orderId]);
-  const subtotal = rows.reduce((s, r) => s + (r.qty || 0) * (r.unit_price || 0), 0);
-  const order = await queryOne('SELECT tax FROM rest_orders WHERE id=?', [orderId]);
-  const tax = (order && order.tax) || 0;
-  const total = subtotal + tax;
-  await run('UPDATE rest_orders SET subtotal=?,total=? WHERE id=?', [subtotal, total, orderId]);
-  return { subtotal, tax, total };
-}
-async function loadRestOrder(id, ownerId) {
-  const order = await queryOne('SELECT * FROM rest_orders WHERE id=? AND owner_id=?', [id, ownerId]);
-  if (!order) return null;
-  order.items = await query('SELECT * FROM rest_order_items WHERE order_id=? ORDER BY id', [id]);
-  return order;
-}
-
-app.get('/api/rest/orders', auth, isolatedOnly, async (req, res) => {
-  try {
-    let q = 'SELECT * FROM rest_orders WHERE owner_id=?';
-    const params = [req.session.user.id];
-    if (req.query.status) { q += ' AND status=?'; params.push(req.query.status); }
-    q += ' ORDER BY id DESC';
-    res.json(await query(q, params));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.get('/api/rest/orders/:id', auth, isolatedOnly, async (req, res) => {
-  try {
-    const order = await loadRestOrder(req.params.id, req.session.user.id);
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    res.json(order);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.post('/api/rest/orders', auth, isolatedOnly, async (req, res) => {
-  try {
-    const { table_id, table_name, notes, currency } = req.body;
-    const user = req.session.user;
-    const { num, row } = await withUniqueNumRetry('rest-orders', user, null, (num) =>
-      queryOne('INSERT INTO rest_orders (num,table_id,table_name,notes,currency,owner_id,owner_name) VALUES (?,?,?,?,?,?,?) RETURNING id',
-        [num, table_id || null, table_name || '', notes || '', currency || 'USD', user.id, user.display_name])
-    );
-    if (table_id) await run('UPDATE rest_tables SET status=? WHERE id=? AND owner_id=?', ['occupied', table_id, user.id]);
-    const order = await loadRestOrder(row.id, user.id);
-    res.json(order);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.put('/api/rest/orders/:id', auth, isolatedOnly, async (req, res) => {
-  try {
-    const order = await queryOne('SELECT * FROM rest_orders WHERE id=? AND owner_id=?', [req.params.id, req.session.user.id]);
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    const { status, table_id, table_name, notes, tax } = req.body;
-    await run('UPDATE rest_orders SET status=COALESCE(?,status),table_id=COALESCE(?,table_id),table_name=COALESCE(?,table_name),notes=COALESCE(?,notes),tax=COALESCE(?,tax) WHERE id=?',
-      [status || null, table_id !== undefined ? table_id : null, table_name !== undefined ? table_name : null, notes !== undefined ? notes : null, tax !== undefined ? tax : null, order.id]);
-    if (tax !== undefined) await recomputeRestOrderTotals(order.id);
-    if (status === 'cancelled' || status === 'paid') {
-      const tid = table_id !== undefined ? table_id : order.table_id;
-      if (tid) await run('UPDATE rest_tables SET status=? WHERE id=? AND owner_id=?', ['free', tid, req.session.user.id]);
-    }
-    res.json(await loadRestOrder(order.id, req.session.user.id));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.delete('/api/rest/orders/:id', auth, isolatedOnly, async (req, res) => {
-  try {
-    const order = await queryOne('SELECT * FROM rest_orders WHERE id=? AND owner_id=?', [req.params.id, req.session.user.id]);
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    await run('DELETE FROM rest_order_items WHERE order_id=?', [order.id]);
-    await run('DELETE FROM rest_orders WHERE id=?', [order.id]);
-    if (order.table_id) await run('UPDATE rest_tables SET status=? WHERE id=? AND owner_id=?', ['free', order.table_id, req.session.user.id]);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/rest/orders/:id/items', auth, isolatedOnly, async (req, res) => {
-  try {
-    const order = await queryOne('SELECT * FROM rest_orders WHERE id=? AND owner_id=?', [req.params.id, req.session.user.id]);
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    const { product_id, qty, notes } = req.body;
-    const product = product_id ? await queryOne('SELECT * FROM rest_products WHERE id=? AND owner_id=?', [product_id, req.session.user.id]) : null;
-    if (!product) return res.status(400).json({ error: 'Product not found' });
-    await run('INSERT INTO rest_order_items (order_id,product_id,product_name,qty,unit_price,notes) VALUES (?,?,?,?,?,?)',
-      [order.id, product.id, product.name, qty || 1, product.price, notes || '']);
-    await recomputeRestOrderTotals(order.id);
-    res.json(await loadRestOrder(order.id, req.session.user.id));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.put('/api/rest/orders/:id/items/:itemId', auth, isolatedOnly, async (req, res) => {
-  try {
-    const order = await queryOne('SELECT * FROM rest_orders WHERE id=? AND owner_id=?', [req.params.id, req.session.user.id]);
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    const { qty, notes, kitchen_status } = req.body;
-    await run('UPDATE rest_order_items SET qty=COALESCE(?,qty),notes=COALESCE(?,notes),kitchen_status=COALESCE(?,kitchen_status) WHERE id=? AND order_id=?',
-      [qty || null, notes !== undefined ? notes : null, kitchen_status || null, req.params.itemId, order.id]);
-    await recomputeRestOrderTotals(order.id);
-    res.json(await loadRestOrder(order.id, req.session.user.id));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.delete('/api/rest/orders/:id/items/:itemId', auth, isolatedOnly, async (req, res) => {
-  try {
-    const order = await queryOne('SELECT * FROM rest_orders WHERE id=? AND owner_id=?', [req.params.id, req.session.user.id]);
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    await run('DELETE FROM rest_order_items WHERE id=? AND order_id=?', [req.params.itemId, order.id]);
-    await recomputeRestOrderTotals(order.id);
-    res.json(await loadRestOrder(order.id, req.session.user.id));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-// Sends every still-pending item to the kitchen at once — this is what prints the kitchen
-// ticket from, and flips the order into 'sent_kitchen' so the POS screen shows it's in progress.
-app.post('/api/rest/orders/:id/send-kitchen', auth, isolatedOnly, async (req, res) => {
-  try {
-    const order = await queryOne('SELECT * FROM rest_orders WHERE id=? AND owner_id=?', [req.params.id, req.session.user.id]);
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    await run("UPDATE rest_order_items SET kitchen_status='sent' WHERE order_id=? AND kitchen_status='pending'", [order.id]);
-    await run("UPDATE rest_orders SET status='sent_kitchen' WHERE id=?", [order.id]);
-    res.json(await loadRestOrder(order.id, req.session.user.id));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.post('/api/rest/orders/:id/pay', auth, isolatedOnly, async (req, res) => {
-  try {
-    const order = await queryOne('SELECT * FROM rest_orders WHERE id=? AND owner_id=?', [req.params.id, req.session.user.id]);
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    const { payment_method, tax } = req.body;
-    await run('UPDATE rest_orders SET tax=COALESCE(?,tax) WHERE id=?', [tax !== undefined ? tax : null, order.id]);
-    await recomputeRestOrderTotals(order.id);
-    await run("UPDATE rest_orders SET status='paid',payment_method=?,paid_at=? WHERE id=?",
-      [payment_method || 'Cash', new Date().toISOString(), order.id]);
-    if (order.table_id) await run('UPDATE rest_tables SET status=? WHERE id=? AND owner_id=?', ['free', order.table_id, req.session.user.id]);
-    res.json(await loadRestOrder(order.id, req.session.user.id));
-  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 /* DEV PROJECTS — Boudy's private infrastructure registry, not visible to anyone else */
