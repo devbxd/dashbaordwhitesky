@@ -1,10 +1,10 @@
 // M&S IA — the dashboard's AI assistant and video maker.
 //
-// Chat:  Gemini answers questions about the signed-in account's data through read-only
+// Chat:  Groq (Gemini as fallback) answers questions about the signed-in account's data through read-only
 //        tools. Every tool reads through this app's own GET endpoints, called with the
 //        user's session cookie, so M&S IA sees exactly what that account already sees —
 //        the same owner_id / isolated-tenant rules — and never another account's data.
-// Video: Gemini writes the script; this module provides the voice-over (Microsoft Edge
+// Video: the AI writes the script; this module provides the voice-over (Microsoft Edge
 //        TTS, word timings included) and stock footage (Pexels). The browser does the
 //        editing (public/js/msia.js), so no server-side video processing is needed.
 //
@@ -416,13 +416,87 @@ const CREATE_VIDEO_DECLARATION = {
   },
 };
 
+// Pages a live demo can visit, with what each one shows (the model writes narration from this).
+// Admin, projects and settings are left out on purpose: they hold account configuration.
+const DEMO_PAGES = {
+  dashboard: 'Dashboard: money collected, pending and overdue, clients, invoices, expenses, net result, quick actions, upcoming deadlines',
+  clients: 'Clients: the client directory with contact details and tags',
+  catalog: 'Catalog: reusable services and prices to pick when building quotes and invoices',
+  quotes: 'Quotes: all quotes, convertible into invoices in one click',
+  'new-quote': 'New quote form',
+  invoices: 'Invoices: every invoice with status (paid, pending, overdue), PDF and QR authenticity check',
+  'new-invoice': 'New invoice form: lines with PNR, passenger, airline, destination, travel date and price',
+  tickets: 'Ticket sales: airline tickets with PNR, net and selling price, profit',
+  'new-ticket': 'New ticket sale form',
+  hotels: 'Hotel bookings: hotel, destination, check-in/out, net and selling price',
+  'new-hotel': 'New hotel booking form',
+  'hotel-vouchers': 'Hotel vouchers: printable booking vouchers for guests',
+  visas: 'Visas: visa applications, countries, appointments and status',
+  'new-visa': 'New visa application form',
+  groups: 'Group trips: groups with their travelers, amounts expected and collected',
+  'new-group': 'New group trip form',
+  passports: 'Client passports: stored passports with expiry alerts',
+  'new-passport': 'New passport form',
+  payments: 'Payments: every payment received, linked to its invoice',
+  receipts: 'Receipts: payment receipts ready to print or send',
+  expenses: 'Expenses: business expenses by category',
+  'credit-notes': 'Credit notes: refunds and corrections',
+  statements: 'Statements: account statements per client',
+  reports: 'Reports: revenue by month, profit, expenses and charts',
+};
+
+const CREATE_DEMO_DECLARATION = {
+  name: 'create_demo_video',
+  description:
+    'Record a LIVE demo video of this dashboard itself: the app opens each chosen page on screen while a narrator explains it, with captions. Use this (not create_video) whenever the user wants a video that shows, presents, explains or demonstrates the system, its features, a tutorial or a walkthrough. Available pages: ' +
+    Object.entries(DEMO_PAGES).map(([id, what]) => `${id} = ${what}`).join('; ') + '.',
+  parameters: {
+    type: 'OBJECT',
+    properties: {
+      title: { type: 'STRING', description: 'Short title of the demo, in the video language.' },
+      language: { type: 'STRING', enum: ['ar', 'fr', 'en'], description: 'Narration language. Default to the language the user writes in.' },
+      voice_gender: { type: 'STRING', enum: ['male', 'female'] },
+      scenes: {
+        type: 'ARRAY',
+        description: '3 to 8 scenes in a logical order (usually starting with the dashboard). Each scene shows one page while its narration is read.',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            page: { type: 'STRING', enum: Object.keys(DEMO_PAGES) },
+            narration: { type: 'STRING', description: '1 to 3 spoken sentences (15-45 words) explaining what this page lets the agency do and why it helps. Plain spoken text, no emojis or lists.' },
+          },
+          required: ['page', 'narration'],
+        },
+      },
+    },
+    required: ['title', 'language', 'scenes'],
+  },
+};
+
+function toDemoRequest(args) {
+  const language = args.language === 'fr' || args.language === 'en' ? args.language : 'ar';
+  const scenes = (Array.isArray(args.scenes) ? args.scenes : [])
+    .filter((s) => s && DEMO_PAGES[s.page] && typeof s.narration === 'string' && s.narration.trim())
+    .slice(0, 8)
+    .map((s) => ({ page: s.page, narration: s.narration.trim().slice(0, 500) }));
+  if (!scenes.length) return null;
+  return {
+    id: randomUUID(),
+    title: typeof args.title === 'string' ? args.title.trim().slice(0, 120) : '',
+    language,
+    voice: defaultVoice(language, args.voice_gender === 'female' ? 'female' : 'male'),
+    scenes,
+  };
+}
+
 function systemPrompt(user, companyName) {
   const today = new Date().toISOString().slice(0, 10);
   return `You are "M&S IA", the AI assistant built into the business dashboard of ${companyName || 'this agency'} (invoices, quotes, clients, payments, expenses, credit notes, and for travel agencies: ticket sales, hotel bookings, visas, group trips and client passports). You are talking to ${user.display_name || user.username}. Today is ${today}.
 
 You do two things:
 1. Answer questions about this account's business by calling the tools. The tools only return data this account is allowed to see — never suggest you can see other accounts. Never guess or invent numbers, names, dates or statuses; if the tools do not have it, say so. For counts and totals, use totalMatches and sums from the tools, not the length of a truncated list. Always state the currency of amounts.
-2. Make short videos for social media with create_video. Write the script yourself: warm, professional, trustworthy and accurate; never invent prices, dates, offers or promises (only use real figures from the tools if the user wants a video based on their data). Do not ask for confirmation first unless the request is really unclear — just make it, then in one or two sentences tell the user the video is being produced below and that they can edit the script or options in the video card.
+2. Make short videos for social media with create_video (stock footage + voice-over). Write the script yourself: warm, professional, trustworthy and accurate; never invent prices, dates, offers or promises (only use real figures from the tools if the user wants a video based on their data). Do not ask for confirmation first unless the request is really unclear — just make it, then in one or two sentences tell the user the video is ready to create below and that they can edit it in the card.
+3. When the user wants a video that shows or explains THIS system (a demo, tutorial, walkthrough or presentation of the dashboard and its features), use create_demo_video instead: pick the relevant pages and write the narration for each. Then tell the user in one or two sentences to press "Record demo" in the card, choose "This tab" when Chrome asks, and not touch the mouse until it finishes.
 
 Always reply in the language the user wrote in (Arabic, French or English). Be concise and practical: lead with the answer, then short bullet points or a small markdown table for lists. You can draft messages (e.g. WhatsApp payment reminders, emails to clients). You can only read data; if asked to change something, explain which page of the dashboard to use.`;
 }
@@ -525,7 +599,15 @@ module.exports = function registerMsIa(app, { auth, port }) {
       const read = makeReader(req, port);
       const settings = await read('/api/settings').catch(() => ({}));
       const videos = [];
+      const demos = [];
       const execute = async (name, args) => {
+        if (name === 'create_demo_video') {
+          const demo = toDemoRequest(args);
+          if (demo && demos.length < 1) demos.push(demo);
+          return demo
+            ? { status: 'The demo card is now shown in the chat; the user records it with the Record demo button.' }
+            : { error: 'No valid scenes — each scene needs a page from the list and a narration.' };
+        }
         if (name === 'create_video') {
           const video = toVideoRequest(args);
           if (video && videos.length < 3) videos.push(video);
@@ -542,18 +624,20 @@ module.exports = function registerMsIa(app, { auth, port }) {
       const job = {
         system: systemPrompt(req.session.user, settings.company_name),
         history,
-        declarations: [...TOOL_DECLARATIONS, CREATE_VIDEO_DECLARATION],
+        declarations: [...TOOL_DECLARATIONS, CREATE_VIDEO_DECLARATION, CREATE_DEMO_DECLARATION],
         execute,
       };
 
       // Groq first (generous free tier); Gemini only if every Groq model is out of quota.
       let result = process.env.GROQ_API_KEY ? await converseGroq(job) : null;
       if ((!result || (!result.ok && result.exhausted)) && process.env.GEMINI_API_KEY) {
-        videos.length = 0; // the Gemini run starts over, so drop anything the failed run queued
+        // The Gemini run starts over, so drop anything the failed run queued.
+        videos.length = 0;
+        demos.length = 0;
         result = await converseGemini(job);
       }
       if (!result.ok) return res.status(result.status || 502).json({ error: result.error });
-      res.json({ reply: result.reply || (videos.length ? '' : "Sorry, I couldn't find an answer to that."), videos });
+      res.json({ reply: result.reply || (videos.length || demos.length ? '' : "Sorry, I couldn't find an answer to that."), videos, demos });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

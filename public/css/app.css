@@ -630,3 +630,31 @@ html[dir="rtl"] .header-actions,html[dir="rtl"] .form-actions,html[dir="rtl"] .m
   .msia-card-body.portrait .msia-preview{max-width:240px;margin:0 auto}
   .msia-bubble{max-width:90%}
 }
+
+/* M&S IA — live demo recording (overlay drawn over the real app while it tours itself) */
+.msia-scenes{display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto}
+.msia-scene{display:flex;gap:10px;align-items:flex-start;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px}
+.msia-scene.off{opacity:.45}
+.msia-scene>span,.msia-scene-edit-top>span{width:22px;height:22px;flex-shrink:0;border-radius:50%;background:var(--navy);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.msia-scene b{display:block;font-size:12.5px;color:var(--ink)}
+.msia-scene small{display:block;font-size:12px;color:var(--ink-soft);line-height:1.45;margin-top:2px}
+.msia-check-inline{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-soft);cursor:pointer}
+.msia-scene-edit{display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px}
+.msia-scene-edit-top{display:flex;align-items:center;gap:8px}
+.msia-scene-edit-top select{flex:1}
+.msia-demo-layer{position:fixed;inset:0;z-index:100000;pointer-events:auto;cursor:none}
+.msia-demo-card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:2rem;background:radial-gradient(circle at 50% 35%,var(--navy-2),var(--navy-deep) 70%);color:#fff;opacity:0;transition:opacity .45s ease}
+.msia-demo-card.on{opacity:1}
+.msia-demo-card h1{font-size:clamp(28px,4vw,48px);font-weight:800;letter-spacing:-.02em;max-width:80%}
+.msia-demo-card p{font-size:clamp(14px,1.6vw,20px);color:#E3C27A;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.msia-demo-card-logo{width:72px;height:72px;border-radius:20px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font-size:34px;color:#E3C27A}
+.msia-demo-brand{position:absolute;bottom:22px;right:22px;display:flex;align-items:center;gap:8px;background:rgba(11,58,99,.92);color:#fff;border-radius:99px;padding:8px 16px;font-size:14px;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+.msia-demo-brand i{width:9px;height:9px;border-radius:50%;background:#D9B25B}
+.msia-demo-brand small{font-size:11px;font-weight:600;color:#E3C27A;border-left:1px solid rgba(255,255,255,.25);padding-left:8px;text-transform:uppercase;letter-spacing:.05em}
+.msia-demo-cap{position:absolute;left:50%;bottom:6%;transform:translate(-50%,12px);max-width:min(900px,74vw);background:rgba(8,42,74,.9);color:#fff;border-radius:14px;padding:12px 22px;font-size:clamp(17px,1.7vw,24px);font-weight:700;line-height:1.45;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.3);opacity:0;transition:opacity .2s ease,transform .2s ease}
+.msia-demo-cap.on{opacity:1;transform:translate(-50%,0)}
+.msia-demo-cap span.now{color:#E3C27A}
+.msia-demo-on .nav-item.msia-demo-spot{background:rgba(217,178,91,.22)!important;color:#fff!important;box-shadow:inset 3px 0 0 #D9B25B}
+.msia-demo-on #main-content .btn-new.msia-demo-spot{animation:msiaSpot 1.4s ease-in-out 2}
+@keyframes msiaSpot{0%,100%{box-shadow:0 0 0 0 rgba(217,178,91,.0)}50%{box-shadow:0 0 0 7px rgba(217,178,91,.55)}}
+.msia-demo-private #main-content td,.msia-demo-private #main-content .client-card,.msia-demo-private #main-content .stat-value,.msia-demo-private #main-content .stat-detail,.msia-demo-private #main-content .deadline-title,.msia-demo-private #main-content .deadline-sub,.msia-demo-private #main-content .form-input,.msia-demo-private .user-info{filter:blur(6px)}

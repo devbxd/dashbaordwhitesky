@@ -5,6 +5,7 @@
 const MSIA = {
   messages: [],      // { id, role:'user'|'assistant', text, videoIds?, error? }
   videos: {},        // id -> video state (see msiaNewVideo)
+  demos: {},         // id -> live demo state (see msiaNewDemo)
   thinking: false,
   renderingId: null,
   status: null,      // /api/msia/status
@@ -18,7 +19,7 @@ const MSIA_SUGGESTIONS = [
   { icon: 'ti-alarm', label: 'Coming up', prompt: 'What deadlines are coming up soon (passports, visas, invoices due)?' },
   { icon: 'ti-brand-whatsapp', label: 'Payment reminder', prompt: 'Draft a polite WhatsApp reminder in Arabic for clients with overdue invoices.' },
   { icon: 'ti-movie', label: 'Promo video', prompt: 'Make a 30-second vertical video in Arabic promoting our travel agency.' },
-  { icon: 'ti-movie', label: 'Vidéo en français', prompt: 'Fais une vidéo de 30 secondes en français : 5 conseils pour bien préparer ses vacances.' },
+  { icon: 'ti-device-desktop', label: 'Live demo of the system', prompt: 'Fais une vidéo démo en direct du système qui présente ses principales fonctionnalités, en français.' },
 ];
 
 const MSIA_FORMATS = [
@@ -123,7 +124,8 @@ async function pageMsIa(mc) {
 
 function msiaNewChat() {
   if (MSIA.thinking || MSIA.renderingId) return;
-  Object.values(MSIA.videos).forEach((v) => v.result && URL.revokeObjectURL(v.result.url));
+  [...Object.values(MSIA.videos), ...Object.values(MSIA.demos)].forEach((v) => v.result && URL.revokeObjectURL(v.result.url));
+  MSIA.demos = {};
   MSIA.messages = [];
   MSIA.videos = {};
   msiaRenderThread();
@@ -153,9 +155,12 @@ function msiaRenderThread() {
     const body = m.error
       ? `<div class="msia-error"><i class="ti ti-alert-triangle"></i> ${msiaEsc(m.text)}</div>`
       : (m.text ? `<div class="msia-md" dir="auto">${msiaMarkdown(m.text)}</div>` : '');
-    return `<div class="msia-row"><div class="msia-avatar"><i class="ti ti-sparkles"></i></div><div class="msia-answer">${body}${(m.videoIds || []).map((id) => `<div class="msia-video" id="msia-v-${id}"></div>`).join('')}</div></div>`;
+    return `<div class="msia-row"><div class="msia-avatar"><i class="ti ti-sparkles"></i></div><div class="msia-answer">${body}${(m.videoIds || []).map((id) => `<div class="msia-video" id="msia-v-${id}"></div>`).join('')}${(m.demoIds || []).map((id) => `<div class="msia-video" id="msia-d-${id}"></div>`).join('')}</div></div>`;
   }).join('') + (MSIA.thinking ? `<div class="msia-row"><div class="msia-avatar"><i class="ti ti-sparkles"></i></div><div class="msia-typing"><span></span><span></span><span></span></div></div>` : '');
-  MSIA.messages.forEach((m) => (m.videoIds || []).forEach((id) => msiaRenderVideo(id)));
+  MSIA.messages.forEach((m) => {
+    (m.videoIds || []).forEach((id) => msiaRenderVideo(id));
+    (m.demoIds || []).forEach((id) => msiaRenderDemo(id));
+  });
   const sc = document.getElementById('msia-scroll');
   if (sc) sc.scrollTop = sc.scrollHeight;
 }
@@ -163,10 +168,13 @@ function msiaRenderThread() {
 // What the model sees of earlier turns: video cards are summarised so "make it shorter" or
 // "now in French" have the script to work from.
 function msiaHistoryText(m) {
-  if (!m.videoIds || !m.videoIds.length) return m.text;
-  const notes = m.videoIds.map((id) => {
+  const notes = (m.videoIds || []).map((id) => {
     const v = MSIA.videos[id];
     return v ? `[Video created — title: "${v.title}", language: ${v.language}, format: ${v.format}. Script: ${v.script}]` : '';
+  });
+  (m.demoIds || []).forEach((id) => {
+    const d = MSIA.demos[id];
+    if (d) notes.push(`[Live demo created — title: "${d.title}", language: ${d.language}. Scenes: ${d.scenes.map((s) => `${s.page}: ${s.narration}`).join(' | ')}]`);
   });
   return [m.text, ...notes].filter(Boolean).join('\n');
 }
@@ -189,7 +197,11 @@ async function msiaSend(text) {
       MSIA.videos[req.id] = msiaNewVideo(req);
       return req.id;
     });
-    MSIA.messages.push({ id: msiaId(), role: 'assistant', text: data.reply || '', videoIds });
+    const demoIds = (data.demos || []).map((req) => {
+      MSIA.demos[req.id] = msiaNewDemo(req);
+      return req.id;
+    });
+    MSIA.messages.push({ id: msiaId(), role: 'assistant', text: data.reply || '', videoIds, demoIds });
     // Only the newest video starts on its own, and only if nothing else is being edited.
     if (videoIds.length && !MSIA.renderingId) setTimeout(() => msiaCreate(videoIds[0]), 0);
   } catch (e) {
@@ -340,7 +352,7 @@ function msiaSetLanguage(id, code) { const v = MSIA.videos[id]; v.language = cod
 function msiaSetFormat(id, format) { MSIA.videos[id].format = format; msiaRenderVideo(id); }
 function msiaSetMusic(id, file) { MSIA.videos[id].music = file || null; msiaRenderVideo(id); }
 function msiaCancel(id) { MSIA.videos[id]?.abort?.abort(); }
-function msiaRenderAllVideos() { Object.keys(MSIA.videos).forEach(msiaRenderVideo); }
+function msiaRenderAllVideos() { Object.keys(MSIA.videos).forEach(msiaRenderVideo); Object.keys(MSIA.demos).forEach(msiaRenderDemo); }
 
 function msiaFileName(title, ext) {
   const slug = String(title || '').toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 50);
@@ -673,5 +685,300 @@ async function msiaRenderVideoFile(input) {
     cancelAnimationFrame(rafId);
     clips.forEach((c) => { c.pause(); URL.revokeObjectURL(c.src); c.removeAttribute('src'); c.load(); });
     audioCtx.close().catch(() => {});
+  }
+}
+
+/* ─── Live demo: record THIS dashboard while it tours its own pages ───
+   The browser records the current tab (getDisplayMedia — Chrome asks the user to share it),
+   the app opens each scene's page, highlights it and scrolls through it while the narration
+   plays, and captions + branding are drawn as a DOM overlay so they land in the recording. */
+
+const MSIA_DEMO_END = { ar: 'شكراً لمشاهدتكم', fr: "Merci d'avoir regardé", en: 'Thanks for watching' };
+const MSIA_DEMO_TAG = { ar: 'عرض مباشر', fr: 'Démo en direct', en: 'Live demo' };
+
+function msiaNewDemo(req) {
+  return { ...req, brand: msiaBrand(), blur: true, phase: 'idle', progress: 0, error: null, result: null, showOptions: false, abort: null };
+}
+
+function msiaPageLabel(page) {
+  return (document.querySelector(`.nav-item[data-page="${page}"] span`)?.textContent || page).trim();
+}
+// Pages this account doesn't have (e.g. travel pages on the Cyber account) are skipped.
+function msiaPageAvailable(page) {
+  const nav = document.querySelector(`.nav-item[data-page="${page}"]`);
+  return !!nav && !nav.classList.contains('hidden');
+}
+
+function msiaRenderDemo(id) {
+  const el = document.getElementById(`msia-d-${id}`);
+  const d = MSIA.demos[id];
+  if (!el || !d) return;
+  const lang = msiaLang(d.language);
+  const busy = d.phase === 'preparing' || d.phase === 'recording';
+  const locked = MSIA.renderingId && MSIA.renderingId !== id;
+  const canRecord = !busy && !locked && !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && !!msiaPickMime() && d.scenes.some((s) => msiaPageAvailable(s.page));
+  const scenes = d.scenes.map((s, i) => `
+    <div class="msia-scene ${msiaPageAvailable(s.page) ? '' : 'off'}"><span>${i + 1}</span><div><b>${msiaEsc(msiaPageLabel(s.page))}</b><small dir="auto">${msiaEsc(s.narration)}</small></div></div>`).join('');
+  el.innerHTML = `
+<div class="msia-card">
+  <div class="msia-card-head"><i class="ti ti-device-desktop"></i><b dir="auto">${msiaEsc(d.title || 'Live demo')}</b><span>Live demo · ${d.scenes.length} scenes · ${msiaEsc(lang.label.split(' — ').pop())}</span></div>
+  <div class="msia-card-body">
+    ${d.result ? `<div class="msia-preview" style="aspect-ratio:${d.result.width}/${d.result.height}" id="msia-dprev-${id}"></div>` : `<div class="msia-scenes">${scenes}</div>`}
+    <div class="msia-card-side">
+      ${busy ? `
+        <div class="msia-step active"><span><i class="ti ti-loader-2 spin"></i></span>${d.phase === 'preparing' ? 'Preparing the narration…' : 'Recording the demo…'}</div>
+        <div class="msia-bar"><div style="width:${Math.round(d.progress * 100)}%"></div></div>
+        <div class="msia-note">Don't touch the mouse or keyboard until it finishes. Press Esc to cancel.</div>`
+      : `
+        ${d.error ? `<div class="msia-error"><i class="ti ti-alert-triangle"></i> ${msiaEsc(d.error)}</div>` : ''}
+        ${!d.result ? `<div class="msia-note">When you press <b>Record demo</b>, Chrome asks what to share: choose <b>this tab</b>. The app then tours its pages by itself while the narrator explains them — don't touch anything until it's done.</div>` : ''}
+        ${!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) ? '<div class="msia-note warn">This browser can\'t record the screen — use Chrome or Edge on a computer.</div>' : ''}
+        <label class="msia-check-inline"><input type="checkbox" ${d.blur ? 'checked' : ''} onchange="MSIA.demos['${id}'].blur=this.checked"> Hide client data (blur names, amounts and tables)</label>
+        <div class="msia-actions">
+          ${d.result
+            ? `<a class="btn-new msia-sm" href="${d.result.url}" download="${msiaEsc(msiaFileName(d.title || 'demo', d.result.extension))}"><i class="ti ti-download"></i> Download ${d.result.extension.toUpperCase()} · ${d.result.sizeMb} MB</a>
+               <button type="button" class="btn-secondary msia-sm" onclick="msiaRecordDemo('${id}')" ${canRecord ? '' : 'disabled'}><i class="ti ti-refresh"></i> Record again</button>`
+            : `<button type="button" class="btn-new msia-sm" onclick="msiaRecordDemo('${id}')" ${canRecord ? '' : 'disabled'}><i class="ti ti-player-record"></i> Record demo</button>`}
+          <button type="button" class="btn-secondary msia-sm" onclick="msiaToggleDemoOptions('${id}')"><i class="ti ti-adjustments"></i> Edit scenes &amp; voice</button>
+        </div>
+        ${locked ? '<div class="msia-note">Another video is being made — this one can start when it finishes.</div>' : ''}`}
+    </div>
+  </div>
+  ${d.showOptions && !busy ? msiaDemoOptionsHtml(id, d, lang) : ''}
+</div>`;
+  if (d.result) {
+    const video = document.createElement('video');
+    video.src = d.result.url;
+    video.controls = true;
+    video.playsInline = true;
+    video.addEventListener('loadeddata', () => { if (video.currentTime === 0) video.currentTime = 1; }, { once: true });
+    document.getElementById(`msia-dprev-${id}`)?.appendChild(video);
+  }
+}
+
+function msiaDemoOptionsHtml(id, d, lang) {
+  const langs = (MSIA.status && MSIA.status.languages) || [];
+  const pages = [...document.querySelectorAll('.nav-item[data-page]')]
+    .map((n) => n.dataset.page)
+    .filter((p) => !['msia', 'admin', 'projects', 'settings'].includes(p) && msiaPageAvailable(p));
+  return `
+<div class="msia-options">
+  <label>Title<input class="form-input" dir="auto" value="${msiaEsc(d.title)}" oninput="MSIA.demos['${id}'].title=this.value"></label>
+  ${d.scenes.map((s, i) => `
+  <div class="msia-scene-edit">
+    <div class="msia-scene-edit-top"><span>${i + 1}</span>
+      <select class="form-input" onchange="MSIA.demos['${id}'].scenes[${i}].page=this.value">${pages.map((p) => `<option value="${p}" ${p === s.page ? 'selected' : ''}>${msiaEsc(msiaPageLabel(p))}</option>`).join('')}</select>
+      <button type="button" class="btn-secondary msia-sm" onclick="msiaDemoRemoveScene('${id}',${i})" ${d.scenes.length > 1 ? '' : 'disabled'} aria-label="Remove scene"><i class="ti ti-trash"></i></button>
+    </div>
+    <textarea class="form-input" rows="2" dir="auto" oninput="MSIA.demos['${id}'].scenes[${i}].narration=this.value">${msiaEsc(s.narration)}</textarea>
+  </div>`).join('')}
+  ${d.scenes.length < 10 ? `<button type="button" class="btn-secondary msia-sm" style="align-self:flex-start" onclick="msiaDemoAddScene('${id}')"><i class="ti ti-plus"></i> Add scene</button>` : ''}
+  <div class="msia-grid2">
+    <label>Language<select class="form-input" onchange="msiaDemoSetLanguage('${id}',this.value)">${langs.map((l) => `<option value="${l.code}" ${l.code === d.language ? 'selected' : ''}>${msiaEsc(l.label)}</option>`).join('')}</select></label>
+    <label>Narrator voice<select class="form-input" onchange="MSIA.demos['${id}'].voice=this.value">${lang.voices.map((vo) => `<option value="${vo.id}" ${vo.id === d.voice ? 'selected' : ''}>${msiaEsc(vo.label)}</option>`).join('')}</select></label>
+  </div>
+  <label>Brand name on the video (empty = hidden)<input class="form-input" maxlength="40" value="${msiaEsc(d.brand)}" oninput="MSIA.demos['${id}'].brand=this.value"></label>
+</div>`;
+}
+
+function msiaToggleDemoOptions(id) { const d = MSIA.demos[id]; d.showOptions = !d.showOptions; msiaRenderDemo(id); }
+function msiaDemoRemoveScene(id, i) { MSIA.demos[id].scenes.splice(i, 1); msiaRenderDemo(id); }
+function msiaDemoAddScene(id) { MSIA.demos[id].scenes.push({ page: 'dashboard', narration: '' }); msiaRenderDemo(id); }
+function msiaDemoSetLanguage(id, code) { const d = MSIA.demos[id]; d.language = code; d.voice = (msiaLang(code).voices[0] || {}).id; msiaRenderDemo(id); }
+
+function msiaSleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal && signal.aborted) { reject(msiaAbortError()); return; }
+    const t = setTimeout(resolve, ms);
+    if (signal) signal.addEventListener('abort', () => { clearTimeout(t); reject(msiaAbortError()); }, { once: true });
+  });
+}
+
+// Overlay drawn on top of the real app while recording: title/end cards, brand badge,
+// captions and a click shield (so a stray click can't derail the tour).
+function msiaDemoLayer(d) {
+  const rtl = !!msiaLang(d.language).rtl;
+  const root = document.createElement('div');
+  root.className = 'msia-demo-layer';
+  root.innerHTML = `
+    <div class="msia-demo-card" id="msia-demo-card"></div>
+    ${d.brand ? `<div class="msia-demo-brand"><i></i>${msiaEsc(d.brand)}<small>${msiaEsc(MSIA_DEMO_TAG[d.language] || MSIA_DEMO_TAG.en)}</small></div>` : ''}
+    <div class="msia-demo-cap" id="msia-demo-cap" dir="${rtl ? 'rtl' : 'ltr'}"></div>`;
+  document.body.appendChild(root);
+  const card = root.querySelector('#msia-demo-card');
+  const cap = root.querySelector('#msia-demo-cap');
+  let capKey = null;
+  return {
+    async card(html, ms, signal) {
+      card.innerHTML = html;
+      card.classList.add('on');
+      await msiaSleep(ms, signal);
+      card.classList.remove('on');
+      await msiaSleep(450, signal);
+    },
+    caption(group, t) {
+      if (!group) { if (capKey !== null) { cap.classList.remove('on'); capKey = null; } return; }
+      if (capKey !== group.start) {
+        capKey = group.start;
+        cap.innerHTML = group.words.map((w) => `<span>${msiaEsc(w.text)}</span>`).join(' ');
+        cap.classList.add('on');
+      }
+      const spans = cap.children;
+      group.words.forEach((w, i) => spans[i] && spans[i].classList.toggle('now', t >= w.start && t < w.end + 0.05));
+    },
+    spot(page) {
+      document.querySelectorAll('.msia-demo-spot').forEach((n) => n.classList.remove('msia-demo-spot'));
+      const nav = document.querySelector(`.nav-item[data-page="${page}"]`);
+      if (nav) { nav.classList.add('msia-demo-spot'); nav.scrollIntoView({ block: 'nearest' }); }
+      const btn = document.querySelector('#main-content .btn-new');
+      if (btn) btn.classList.add('msia-demo-spot');
+    },
+    remove() {
+      document.querySelectorAll('.msia-demo-spot').forEach((n) => n.classList.remove('msia-demo-spot'));
+      root.remove();
+    },
+  };
+}
+
+async function msiaDemoGoto(page, signal) {
+  window.scrollTo(0, 0);
+  showPage(page);
+  // Wait for the page to swap its loading skeleton for real content (max 6 s).
+  const start = Date.now();
+  while (document.querySelector('#main-content .skeleton-page') && Date.now() - start < 6000) await msiaSleep(100, signal);
+  await msiaSleep(500, signal);
+}
+
+async function msiaRecordDemo(id) {
+  const d = MSIA.demos[id];
+  if (!d || MSIA.renderingId || d.phase === 'preparing' || d.phase === 'recording') return;
+  const scenes = d.scenes.filter((s) => msiaPageAvailable(s.page) && String(s.narration || '').trim());
+  if (!scenes.length) { d.error = 'Add at least one scene with narration.'; msiaRenderDemo(id); return; }
+
+  // Must be called straight from the click, before any await: Chrome only allows screen
+  // capture right after a user gesture.
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 30, displaySurface: 'browser' },
+      audio: false,
+      preferCurrentTab: true,
+      selfBrowserSurface: 'include',
+      surfaceSwitching: 'exclude',
+      monitorTypeSurfaces: 'exclude',
+    });
+  } catch (e) {
+    d.error = 'Recording was not started. Press "Record demo" again and choose this tab.';
+    msiaRenderDemo(id);
+    return;
+  }
+  const track = stream.getVideoTracks()[0];
+  const controller = new AbortController();
+  const onKey = (e) => { if (e.key === 'Escape') controller.abort(); };
+  track.addEventListener('ended', () => controller.abort()); // "Stop sharing" was clicked
+  document.addEventListener('keydown', onKey);
+  if (d.result) URL.revokeObjectURL(d.result.url);
+  Object.assign(d, { phase: 'preparing', progress: 0, error: null, result: null, showOptions: false, abort: controller });
+  MSIA.renderingId = id;
+  msiaRenderAllVideos();
+
+  let audioCtx = null;
+  let layer = null;
+  let recorder = null;
+  const signal = controller.signal;
+  try {
+    // 1. Narration for every scene (before recording, so nothing waits on the network on camera).
+    const voices = [];
+    for (let i = 0; i < scenes.length; i++) {
+      voices.push(await msiaPost('/api/msia/voice', { text: scenes[i].narration, voice: d.voice }, signal));
+      d.progress = (i + 1) / scenes.length;
+      msiaRenderDemo(id);
+    }
+    audioCtx = new AudioContext();
+    const buffers = await Promise.all(voices.map((v) => audioCtx.decodeAudioData(msiaB64ToBuffer(v.audio))));
+    const dest = audioCtx.createMediaStreamDestination();
+
+    // 2. Recorder: the tab's picture + the narration.
+    const mimeType = msiaPickMime();
+    recorder = new MediaRecorder(new MediaStream([track, ...dest.stream.getAudioTracks()]), { mimeType, videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 });
+    const chunks = [];
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    const stopped = new Promise((resolve) => { recorder.onstop = () => resolve(); });
+
+    layer = msiaDemoLayer(d);
+    document.body.classList.add('msia-demo-on');
+    document.body.classList.toggle('msia-demo-private', !!d.blur);
+    await audioCtx.resume();
+    d.phase = 'recording';
+    d.progress = 0;
+    const totalTime = buffers.reduce((a, b) => a + b.duration + 1.4, 0) + 6;
+    let elapsed = 0;
+
+    // Open the first page behind the title card so the tour starts on real content.
+    await msiaDemoGoto(scenes[0].page, signal);
+    recorder.start(1000);
+    await layer.card(`<div class="msia-demo-card-logo"><i class="ti ti-sparkles"></i></div><h1 dir="auto">${msiaEsc(d.title || d.brand || 'Demo')}</h1>${d.brand ? `<p>${msiaEsc(d.brand)}</p>` : ''}`, 2300, signal);
+    elapsed += 2.8;
+
+    for (let i = 0; i < scenes.length; i++) {
+      if (i > 0) { await msiaDemoGoto(scenes[i].page, signal); elapsed += 0.9; }
+      layer.spot(scenes[i].page);
+      const buf = buffers[i];
+      const groups = msiaGroupCaptions(voices[i].words || [], 9, 64);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(dest);
+      const t0 = audioCtx.currentTime + 0.15;
+      src.start(t0);
+      const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      await new Promise((resolve, reject) => {
+        const frame = () => {
+          if (signal.aborted) { src.stop(); reject(msiaAbortError()); return; }
+          const t = audioCtx.currentTime - t0;
+          if (t >= buf.duration + 0.5) { layer.caption(null); resolve(); return; }
+          layer.caption(groups.find((g) => t >= g.start && t < g.end) || null, t);
+          if (maxScroll > 40) {
+            // Hold the top of the page for a quarter of the scene, then glide down.
+            const p = Math.min(1, Math.max(0, (t - buf.duration * 0.25) / (buf.duration * 0.65)));
+            const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+            window.scrollTo(0, Math.round(maxScroll * 0.85 * eased));
+          }
+          d.progress = Math.min(0.99, (elapsed + Math.max(0, t)) / totalTime);
+          requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+      });
+      elapsed += buf.duration + 0.5;
+    }
+
+    window.scrollTo(0, 0);
+    await layer.card(`<div class="msia-demo-card-logo"><i class="ti ti-sparkles"></i></div><h1 dir="auto">${msiaEsc(MSIA_DEMO_END[d.language] || MSIA_DEMO_END.en)}</h1>${d.brand ? `<p>${msiaEsc(d.brand)}</p>` : ''}`, 2000, signal);
+    recorder.stop();
+    await stopped;
+    const type = mimeType.split(';')[0];
+    const blob = new Blob(chunks, { type });
+    const settings = track.getSettings();
+    d.result = {
+      url: URL.createObjectURL(blob),
+      extension: type === 'video/mp4' ? 'mp4' : 'webm',
+      sizeMb: (blob.size / 1024 / 1024).toFixed(1),
+      width: settings.width || window.innerWidth,
+      height: settings.height || window.innerHeight,
+    };
+    d.phase = 'done';
+  } catch (e) {
+    d.phase = 'idle';
+    d.error = e && e.name === 'AbortError' ? 'Recording stopped before the end.' : (e.message || 'Something went wrong.');
+  } finally {
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+    stream.getTracks().forEach((t) => t.stop());
+    document.removeEventListener('keydown', onKey);
+    if (layer) layer.remove();
+    document.body.classList.remove('msia-demo-on', 'msia-demo-private');
+    if (audioCtx) audioCtx.close().catch(() => {});
+    d.abort = null;
+    if (MSIA.renderingId === id) MSIA.renderingId = null;
+    window.scrollTo(0, 0);
+    showPage('msia');
   }
 }
