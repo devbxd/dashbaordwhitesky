@@ -3,12 +3,13 @@
 // fall back to the last cached copy when there's no connection at all. API requests are
 // left alone here - the app itself decides what to do when one of those fails offline
 // (see the OFFLINE SUPPORT block in app.js).
-const CACHE_NAME = 'msc-app-shell-v1';
+const CACHE_NAME = 'msc-app-shell-v2';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
   '/css/app.css',
   '/css/tabler-icons.min.css',
+  '/js/msia.js',
   '/js/app.js',
   '/fonts/tabler-icons/tabler-icons.woff2',
   '/manifest.json',
