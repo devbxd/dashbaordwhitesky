@@ -8,7 +8,8 @@
 //        TTS, word timings included) and stock footage (Pexels). The browser does the
 //        editing (public/js/msia.js), so no server-side video processing is needed.
 //
-// Needs GEMINI_API_KEY (chat + scripts) and PEXELS_API_KEY (video footage). Both free.
+// Needs GROQ_API_KEY (chat + scripts; GEMINI_API_KEY is an optional fallback) and
+// PEXELS_API_KEY (video footage). All free.
 
 const { randomUUID } = require('crypto');
 
@@ -138,7 +139,7 @@ const TOOL_DECLARATIONS = [
         status: { type: 'STRING', description: 'Exact status, e.g. paid, pending, partial, overdue, draft, accepted, confirmed, cancelled.' },
         from: { type: 'STRING', description: 'Only records on/after this date (YYYY-MM-DD), using the record\'s main date.' },
         to: { type: 'STRING', description: 'Only records on/before this date (YYYY-MM-DD).' },
-        limit: { type: 'INTEGER', description: 'Max records to return (default 25, max 100). Totals always cover every match.' },
+        limit: { type: 'INTEGER', description: 'Max records to return (default 10, max 50). Totals always cover every match.' },
       },
       required: ['type'],
     },
@@ -204,7 +205,7 @@ async function runTool(name, args, read) {
         sums[currency][f] = Math.round(((sums[currency][f] || 0) + n) * 1000) / 1000;
       }
     }
-    const limit = Math.min(Math.max(Number(args.limit) || 25, 1), 100);
+    const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 50);
     return clean({ type: args.type, totalMatches: matches.length, totalRecords: all.length, sums, returned: Math.min(limit, matches.length), records: matches.slice(0, limit) });
   }
 
@@ -259,6 +260,135 @@ async function callGemini(body, models = GEMINI_MODELS) {
 }
 
 const textOf = (content) => content.parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('').trim();
+
+// Tool results are the bulk of every request; capping them keeps each call inside the free
+// tiers' per-minute token budgets (Groq: 8K tokens/minute per model).
+const MAX_TOOL_OUTPUT_CHARS = 9000;
+function fitForModel(output) {
+  const json = JSON.stringify(output);
+  return json.length <= MAX_TOOL_OUTPUT_CHARS ? json : `${json.slice(0, MAX_TOOL_OUTPUT_CHARS)}… [truncated — ask for fewer records or add filters]`;
+}
+
+// Gemini tool loop. Resolves to { ok, reply } or { ok:false, status, error }.
+async function converseGemini({ system, history, declarations, execute }) {
+  const contents = history.map((m) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
+  let models = GEMINI_MODELS;
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    const result = await callGemini(
+      {
+        systemInstruction: { parts: [{ text: system }] },
+        contents,
+        // Last round: no tools, so the model has to answer with what it has.
+        tools: round < MAX_TOOL_ROUNDS ? [{ functionDeclarations: declarations }] : undefined,
+        generationConfig: { temperature: 0.5 },
+      },
+      models
+    );
+    if (!result.ok) return result;
+    // Follow-up rounds stay on the same model: its function-call signatures are model-specific.
+    models = [result.model];
+    const calls = result.content.parts.filter((p) => p.functionCall);
+    if (!calls.length) return { ok: true, reply: textOf(result.content) };
+    // Echo the model turn back unchanged (it carries thought signatures), then answer every call.
+    contents.push(result.content);
+    const parts = [];
+    for (const { functionCall } of calls) {
+      const output = await execute(functionCall.name, functionCall.args || {});
+      const text = fitForModel(output);
+      // Small results go back as structured JSON; oversized ones as their truncated text.
+      parts.push({ functionResponse: { name: functionCall.name, response: { result: text.length <= MAX_TOOL_OUTPUT_CHARS ? output : text } } });
+    }
+    contents.push({ role: 'user', parts });
+  }
+  return { ok: false, status: 502, error: 'The question needed too many steps. Try asking something more specific.' };
+}
+
+/* ─── Groq (primary): generous free tier, OpenAI-compatible, supports tool calling ─── */
+
+// Each model has its own free quota (about 1,000 requests and 200K tokens a day), so when one
+// runs out the conversation simply continues on the next.
+const GROQ_MODELS = [process.env.GROQ_MODEL, 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'].filter(
+  (m, i, all) => m && all.indexOf(m) === i
+);
+
+// Gemini-style declarations use upper-case types; OpenAI-style APIs expect JSON Schema.
+function toJsonSchema(schema) {
+  if (Array.isArray(schema)) return schema.map(toJsonSchema);
+  if (!schema || typeof schema !== 'object') return schema;
+  const out = {};
+  for (const [k, v] of Object.entries(schema)) out[k] = k === 'type' && typeof v === 'string' ? v.toLowerCase() : toJsonSchema(v);
+  return out;
+}
+const toOpenAiTools = (declarations) =>
+  declarations.map((d) => ({
+    type: 'function',
+    function: { name: d.name, description: d.description, parameters: d.parameters ? toJsonSchema(d.parameters) : { type: 'object', properties: {} } },
+  }));
+
+async function callGroq(model, messages, tools) {
+  const send = () =>
+    fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+      body: JSON.stringify({ model, messages, ...(tools ? { tools, tool_choice: 'auto' } : {}), temperature: 0.5 }),
+    }).catch(() => null);
+  let res = await send();
+  // The per-minute token budget refills within seconds: if Groq says the wait is short,
+  // wait once rather than burning through the other models.
+  const retryAfter = res && res.status === 429 ? parseFloat(res.headers.get('retry-after')) : NaN;
+  if (retryAfter > 0 && retryAfter <= 12) {
+    await new Promise((r) => setTimeout(r, retryAfter * 1000 + 250));
+    res = await send();
+  }
+  if (!res) return { ok: false, next: true, status: 502, error: 'Could not reach the AI service.' };
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = (data && data.error) || {};
+    // Quota (429), request too large for the per-minute budget (413), retired model (404),
+    // an outage, or the model producing an unparsable tool call ("tool_use_failed" / a
+    // failed_generation, which is random and usually fine on the next model): move on.
+    const malformed = res.status === 400 && (err.code === 'tool_use_failed' || 'failed_generation' in err || /pars/i.test(err.message || ''));
+    const next = [404, 413, 429].includes(res.status) || res.status >= 500 || malformed;
+    const error = res.status === 429
+      ? 'The free AI quota is used up for now. Wait a minute and try again.'
+      : malformed ? 'The AI got confused by this question. Please rephrase it.' : err.message || `AI error ${res.status}`;
+    return { ok: false, next, status: res.status === 429 ? 429 : 502, error };
+  }
+  const message = data && data.choices && data.choices[0] && data.choices[0].message;
+  if (!message) return { ok: false, next: true, status: 502, error: 'The AI returned an empty answer.' };
+  return { ok: true, message };
+}
+
+// Groq tool loop. Resolves to { ok, reply } or { ok:false, status, error, exhausted }.
+async function converseGroq({ system, history, declarations, execute }) {
+  const tools = toOpenAiTools(declarations);
+  const messages = [{ role: 'system', content: system }, ...history.map((m) => ({ role: m.role, content: m.text }))];
+  let modelIndex = 0;
+  let last = { ok: false, status: 502, error: 'The AI did not answer.' };
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    let result = null;
+    while (modelIndex < GROQ_MODELS.length) {
+      result = await callGroq(GROQ_MODELS[modelIndex], messages, round < MAX_TOOL_ROUNDS ? tools : undefined);
+      if (result.ok || !result.next) break;
+      last = result;
+      modelIndex++;
+    }
+    if (!result || !result.ok) return { ...(result || last), ok: false, exhausted: modelIndex >= GROQ_MODELS.length };
+    const calls = result.message.tool_calls || [];
+    if (!calls.length) return { ok: true, reply: (result.message.content || '').trim() };
+    messages.push({
+      role: 'assistant',
+      content: result.message.content || '',
+      tool_calls: calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.function.name, arguments: c.function.arguments || '{}' } })),
+    });
+    for (const call of calls) {
+      let args = {};
+      try { args = JSON.parse(call.function.arguments || '{}') || {}; } catch { /* the tool reports missing arguments itself */ }
+      messages.push({ role: 'tool', tool_call_id: call.id, content: fitForModel(await execute(call.function.name, args)) });
+    }
+  }
+  return { ok: false, status: 502, error: 'The question needed too many steps. Try asking something more specific.' };
+}
 
 const CREATE_VIDEO_DECLARATION = {
   name: 'create_video',
@@ -375,7 +505,7 @@ function pickFile(files) {
 module.exports = function registerMsIa(app, { auth, port }) {
   app.get('/api/msia/status', auth, (req, res) => {
     res.json({
-      gemini: Boolean(process.env.GEMINI_API_KEY),
+      ai: Boolean(process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY),
       pexels: Boolean(process.env.PEXELS_API_KEY),
       languages: LANGUAGES,
     });
@@ -387,62 +517,43 @@ module.exports = function registerMsIa(app, { auth, port }) {
         ? req.body.messages
             .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string' && m.text.trim())
             .slice(-MAX_HISTORY)
+            .map((m) => ({ role: m.role, text: m.text.slice(0, 4000) }))
         : [];
       if (!history.length || history[history.length - 1].role !== 'user') return res.status(400).json({ error: 'Ask a question first.' });
+      if (!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'No AI key is configured on the server (GROQ_API_KEY).' });
 
       const read = makeReader(req, port);
       const settings = await read('/api/settings').catch(() => ({}));
-      const contents = history.map((m) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text.slice(0, 4000) }] }));
       const videos = [];
-      let models = GEMINI_MODELS;
-
-      for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-        const result = await callGemini(
-          {
-            systemInstruction: { parts: [{ text: systemPrompt(req.session.user, settings.company_name) }] },
-            contents,
-            // Last round: no tools, so the model has to answer with what it has.
-            tools: round < MAX_TOOL_ROUNDS ? [{ functionDeclarations: [...TOOL_DECLARATIONS, CREATE_VIDEO_DECLARATION] }] : undefined,
-            generationConfig: { temperature: 0.5 },
-          },
-          models
-        );
-        if (!result.ok) return res.status(result.status).json({ error: result.error });
-        // Follow-up rounds stay on the same model: its function-call signatures are model-specific.
-        models = [result.model];
-
-        const calls = result.content.parts.filter((p) => p.functionCall);
-        if (!calls.length) {
-          const reply = textOf(result.content);
-          return res.json({ reply: reply || (videos.length ? '' : "Sorry, I couldn't find an answer to that."), videos });
+      const execute = async (name, args) => {
+        if (name === 'create_video') {
+          const video = toVideoRequest(args);
+          if (video && videos.length < 3) videos.push(video);
+          return video
+            ? { status: 'The video card is now shown in the chat and production has started in the browser.' }
+            : { error: 'The script was empty — write the full voice-over text in "script".' };
         }
+        try {
+          return await runTool(name, args, read);
+        } catch (err) {
+          return { error: err.message || 'Tool failed.' };
+        }
+      };
+      const job = {
+        system: systemPrompt(req.session.user, settings.company_name),
+        history,
+        declarations: [...TOOL_DECLARATIONS, CREATE_VIDEO_DECLARATION],
+        execute,
+      };
 
-        // Echo the model turn back unchanged (it carries thought signatures), then answer every call.
-        contents.push(result.content);
-        const responses = await Promise.all(
-          calls.map(async ({ functionCall }) => {
-            const name = functionCall.name;
-            const args = functionCall.args || {};
-            let output;
-            if (name === 'create_video') {
-              const video = toVideoRequest(args);
-              if (video && videos.length < 3) videos.push(video);
-              output = video
-                ? { status: 'The video card is now shown in the chat and production has started in the browser.' }
-                : { error: 'The script was empty — write the full voice-over text in "script".' };
-            } else {
-              try {
-                output = await runTool(name, args, read);
-              } catch (err) {
-                output = { error: err.message || 'Tool failed.' };
-              }
-            }
-            return { functionResponse: { name, response: { result: output } } };
-          })
-        );
-        contents.push({ role: 'user', parts: responses });
+      // Groq first (generous free tier); Gemini only if every Groq model is out of quota.
+      let result = process.env.GROQ_API_KEY ? await converseGroq(job) : null;
+      if ((!result || (!result.ok && result.exhausted)) && process.env.GEMINI_API_KEY) {
+        videos.length = 0; // the Gemini run starts over, so drop anything the failed run queued
+        result = await converseGemini(job);
       }
-      res.status(502).json({ error: 'The question needed too many steps. Try asking something more specific.' });
+      if (!result.ok) return res.status(result.status || 502).json({ error: result.error });
+      res.json({ reply: result.reply || (videos.length ? '' : "Sorry, I couldn't find an answer to that."), videos });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

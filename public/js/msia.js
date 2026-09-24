@@ -90,7 +90,7 @@ async function pageMsIa(mc) {
   if (!MSIA.status) {
     try { MSIA.status = await api('GET', '/api/msia/status'); } catch (e) { MSIA.status = null; }
   }
-  const st = MSIA.status || { gemini: false, pexels: false, languages: [] };
+  const st = MSIA.status || { ai: false, pexels: false, languages: [] };
   mc.innerHTML = `
 <div class="msia-wrap">
   <div class="msia-head">
@@ -100,11 +100,11 @@ async function pageMsIa(mc) {
     </div>
     <button class="btn-secondary msia-new ${MSIA.messages.length ? '' : 'hidden'}" id="msia-new" onclick="msiaNewChat()"><i class="ti ti-edit"></i> New chat</button>
   </div>
-  ${!st.gemini ? `<div class="info-box msia-warn"><i class="ti ti-alert-triangle"></i> Setup needed: add the free <b>GEMINI_API_KEY</b>${!st.pexels ? ' and <b>PEXELS_API_KEY</b>' : ''} to the server environment, then redeploy.</div>` : ''}
+  ${!st.ai ? `<div class="info-box msia-warn"><i class="ti ti-alert-triangle"></i> Setup needed: add the free <b>GROQ_API_KEY</b>${!st.pexels ? ' and <b>PEXELS_API_KEY</b>' : ''} to the server environment, then redeploy.</div>` : ''}
   <div class="msia-scroll" id="msia-scroll"><div class="msia-thread" id="msia-thread"></div></div>
   <form class="msia-composer" id="msia-form">
     <div class="msia-input-row">
-      <textarea id="msia-input" rows="1" dir="auto" placeholder="${st.gemini ? 'Ask a question or describe the video you want…' : 'M&S IA needs a Gemini key to work'}" ${st.gemini ? '' : 'disabled'}></textarea>
+      <textarea id="msia-input" rows="1" dir="auto" placeholder="${st.ai ? 'Ask a question or describe the video you want…' : 'M&S IA needs an AI key to work'}" ${st.ai ? '' : 'disabled'}></textarea>
       <button type="submit" class="msia-send" id="msia-send" aria-label="Send" disabled><i class="ti ti-arrow-up"></i></button>
     </div>
     <div class="msia-foot">M&amp;S IA only sees this account's data and never changes it. Check important answers before acting on them.</div>
@@ -112,7 +112,7 @@ async function pageMsIa(mc) {
 </div>`;
   const input = document.getElementById('msia-input');
   const send = document.getElementById('msia-send');
-  const grow = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; send.disabled = !input.value.trim() || MSIA.thinking || !st.gemini; };
+  const grow = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; send.disabled = !input.value.trim() || MSIA.thinking || !st.ai; };
   input.addEventListener('input', grow);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); msiaSend(input.value); }
@@ -141,7 +141,7 @@ function msiaRenderThread() {
   <h2>Hello${currentUser && currentUser.display_name ? ', ' + msiaEsc(currentUser.display_name.split(' ')[0]) : ''} 👋</h2>
   <p>I know your invoices, clients, payments and bookings — and I can make ready-to-post videos with voice-over and captions, in Arabic, French or English.</p>
   <div class="msia-suggestions">${MSIA_SUGGESTIONS.map((s, i) => `
-    <button type="button" class="msia-sugg" onclick="msiaSend(MSIA_SUGGESTIONS[${i}].prompt)" ${st.gemini ? '' : 'disabled'}>
+    <button type="button" class="msia-sugg" onclick="msiaSend(MSIA_SUGGESTIONS[${i}].prompt)" ${st.ai ? '' : 'disabled'}>
       <span class="msia-sugg-icon"><i class="ti ${s.icon}"></i></span>
       <span><b>${msiaEsc(s.label)}</b><small dir="auto">${msiaEsc(s.prompt)}</small></span>
     </button>`).join('')}</div>
@@ -173,7 +173,7 @@ function msiaHistoryText(m) {
 
 async function msiaSend(text) {
   const q = String(text || '').trim();
-  if (!q || MSIA.thinking || !(MSIA.status && MSIA.status.gemini)) return;
+  if (!q || MSIA.thinking || !(MSIA.status && MSIA.status.ai)) return;
   MSIA.messages.push({ id: msiaId(), role: 'user', text: q });
   MSIA.thinking = true;
   const input = document.getElementById('msia-input');
