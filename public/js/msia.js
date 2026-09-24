@@ -6,6 +6,7 @@ const MSIA = {
   messages: [],      // { id, role:'user'|'assistant', text, videoIds?, error? }
   videos: {},        // id -> video state (see msiaNewVideo)
   demos: {},         // id -> live demo state (see msiaNewDemo)
+  pendingPhotos: [], // photos attached in the composer, sent with the next message
   thinking: false,
   renderingId: null,
   status: null,      // /api/msia/status
@@ -104,7 +105,9 @@ async function pageMsIa(mc) {
   ${!st.ai ? `<div class="info-box msia-warn"><i class="ti ti-alert-triangle"></i> Setup needed: add the free <b>GROQ_API_KEY</b>${!st.pexels ? ' and <b>PEXELS_API_KEY</b>' : ''} to the server environment, then redeploy.</div>` : ''}
   <div class="msia-scroll" id="msia-scroll"><div class="msia-thread" id="msia-thread"></div></div>
   <form class="msia-composer" id="msia-form">
+    <div class="msia-attach hidden" id="msia-attach"></div>
     <div class="msia-input-row">
+      <label class="msia-clip" title="Attach photos for a video" ${st.ai ? '' : 'hidden'}><i class="ti ti-paperclip"></i><input type="file" accept="image/*" multiple hidden onchange="msiaAttach(this.files);this.value=''"></label>
       <textarea id="msia-input" rows="1" dir="auto" placeholder="${st.ai ? 'Ask a question or describe the video you want…' : 'M&S AI needs an AI key to work'}" ${st.ai ? '' : 'disabled'}></textarea>
       <button type="submit" class="msia-send" id="msia-send" aria-label="Send" disabled><i class="ti ti-arrow-up"></i></button>
     </div>
@@ -119,7 +122,24 @@ async function pageMsIa(mc) {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); msiaSend(input.value); }
   });
   document.getElementById('msia-form').addEventListener('submit', (e) => { e.preventDefault(); msiaSend(input.value); });
+  msiaRenderAttach();
   msiaRenderThread();
+}
+
+function msiaAttach(files) {
+  MSIA.pendingPhotos = MSIA.pendingPhotos.concat(msiaImageFiles(files)).slice(0, MSIA_MAX_PHOTOS);
+  msiaRenderAttach();
+  const input = document.getElementById('msia-input');
+  if (input && !input.value.trim()) input.placeholder = 'Describe the video to make with these photos…';
+  input?.focus();
+}
+function msiaUnattach(i) { MSIA.pendingPhotos.splice(i, 1); msiaRenderAttach(); }
+function msiaRenderAttach() {
+  const box = document.getElementById('msia-attach');
+  if (!box) return;
+  box.classList.toggle('hidden', !MSIA.pendingPhotos.length);
+  box.innerHTML = MSIA.pendingPhotos.map((f, i) => `<div class="msia-photo"><img src="${msiaThumb(f)}" alt=""><button type="button" onclick="msiaUnattach(${i})" aria-label="Remove photo"><i class="ti ti-x"></i></button></div>`).join('')
+    + (MSIA.pendingPhotos.length ? `<span class="msia-attach-note">${MSIA.pendingPhotos.length} photo${MSIA.pendingPhotos.length > 1 ? 's' : ''} — the next video will use them</span>` : '');
 }
 
 function msiaNewChat() {
@@ -151,7 +171,10 @@ function msiaRenderThread() {
     return;
   }
   thread.innerHTML = MSIA.messages.map((m) => {
-    if (m.role === 'user') return `<div class="msia-row msia-row-user"><div class="msia-bubble" dir="auto">${msiaEsc(m.text)}</div></div>`;
+    if (m.role === 'user') {
+      const pics = (m.photos || []).length ? `<div class="msia-bubble-photos">${m.photos.slice(0, 8).map((f) => `<img src="${msiaThumb(f)}" alt="">`).join('')}${m.photos.length > 8 ? `<span>+${m.photos.length - 8}</span>` : ''}</div>` : '';
+      return `<div class="msia-row msia-row-user"><div class="msia-bubble" dir="auto">${pics}${msiaEsc(m.text)}</div></div>`;
+    }
     const body = m.error
       ? `<div class="msia-error"><i class="ti ti-alert-triangle"></i> ${msiaEsc(m.text)}</div>`
       : (m.text ? `<div class="msia-md" dir="auto">${msiaMarkdown(m.text)}</div>` : '');
@@ -168,6 +191,9 @@ function msiaRenderThread() {
 // What the model sees of earlier turns: video cards are summarised so "make it shorter" or
 // "now in Arabic" have the script to work from.
 function msiaHistoryText(m) {
+  if (m.role === 'user' && m.photos && m.photos.length) {
+    return `${m.text}\n[The user attached ${m.photos.length} photo${m.photos.length > 1 ? 's' : ''} for the video. They will be used as the footage automatically.]`;
+  }
   const notes = (m.videoIds || []).map((id) => {
     const v = MSIA.videos[id];
     return v ? `[Video created — title: "${v.title}", language: ${v.language}, format: ${v.format}. Script: ${v.script}]` : '';
@@ -182,7 +208,10 @@ function msiaHistoryText(m) {
 async function msiaSend(text) {
   const q = String(text || '').trim();
   if (!q || MSIA.thinking || !(MSIA.status && MSIA.status.ai)) return;
-  MSIA.messages.push({ id: msiaId(), role: 'user', text: q });
+  const photos = MSIA.pendingPhotos;
+  MSIA.pendingPhotos = [];
+  msiaRenderAttach();
+  MSIA.messages.push({ id: msiaId(), role: 'user', text: q, photos });
   MSIA.thinking = true;
   const input = document.getElementById('msia-input');
   if (input) { input.value = ''; input.style.height = 'auto'; }
@@ -195,6 +224,8 @@ async function msiaSend(text) {
     });
     const videoIds = (data.videos || []).map((req) => {
       MSIA.videos[req.id] = msiaNewVideo(req);
+      // Photos sent with this question become the footage of the video it produced.
+      if (photos.length) MSIA.videos[req.id].photos = photos.slice();
       return req.id;
     });
     const demoIds = (data.demos || []).map((req) => {
@@ -226,6 +257,7 @@ function msiaNewVideo(req) {
     captions: true,
     music: null,
     musicVolume: 0.15,
+    photos: [],    // user photos (File); when present they replace stock footage
     phase: 'idle', // idle | working | done
     steps: { voice: 'pending', footage: 'pending', render: 'pending' },
     progress: 0,
@@ -251,7 +283,8 @@ function msiaRenderVideo(id) {
   const supported = !!msiaPickMime();
   const pexels = MSIA.status && MSIA.status.pexels;
   const locked = MSIA.renderingId && MSIA.renderingId !== id;
-  const canCreate = pexels && supported && v.phase !== 'working' && !locked && v.script.trim() && v.keywords.length;
+  const hasPhotos = v.photos.length > 0;
+  const canCreate = (pexels || hasPhotos) && supported && v.phase !== 'working' && !locked && v.script.trim() && (hasPhotos || v.keywords.length);
   const working = v.phase === 'working';
   const overall = Math.round((((v.steps.voice === 'done' ? 1 : 0) + (v.steps.footage === 'done' ? 1 : v.steps.footage === 'active' ? v.progress : 0) + (v.steps.render === 'active' ? v.progress : 0)) / 3) * 100);
   const stepRow = (key, label, icon) => {
@@ -266,22 +299,23 @@ function msiaRenderVideo(id) {
     <div class="msia-preview" style="aspect-ratio:${fmtInfo.width}/${fmtInfo.height}" id="msia-prev-${id}"></div>
     <div class="msia-card-side">
       ${working ? `
-        ${stepRow('voice', 'Voice-over', 'ti-microphone')}${stepRow('footage', 'Footage', 'ti-video')}${stepRow('render', 'Editing', 'ti-movie')}
+        ${stepRow('voice', 'Voice-over', 'ti-microphone')}${stepRow('footage', hasPhotos ? 'Photos' : 'Footage', hasPhotos ? 'ti-photo' : 'ti-video')}${stepRow('render', 'Editing', 'ti-movie')}
         <div class="msia-bar"><div style="width:${overall}%"></div></div>
         <div class="msia-note">Editing happens live in this tab — keep it open until it finishes.</div>
         <button type="button" class="btn-secondary msia-sm" onclick="msiaCancel('${id}')">Cancel</button>`
       : `<div class="msia-script" dir="auto">${msiaEsc(v.script)}</div>
         ${v.error ? `<div class="msia-error"><i class="ti ti-alert-triangle"></i> ${msiaEsc(v.error)}</div>` : ''}
-        ${!pexels ? '<div class="msia-note warn">PEXELS_API_KEY is not configured on the server, so videos can\'t be created yet.</div>' : ''}
+        ${!pexels && !hasPhotos ? '<div class="msia-note warn">PEXELS_API_KEY is not configured on the server — add your own photos in "Edit script &amp; options" to create this video.</div>' : ''}
+        ${hasPhotos ? `<div class="msia-note"><i class="ti ti-photo"></i> Made with your ${v.photos.length} photo${v.photos.length > 1 ? 's' : ''}.</div>` : ''}
         ${!supported ? '<div class="msia-note warn">This browser can\'t record video — use Chrome or Edge on a computer.</div>' : ''}
         <div class="msia-actions">
           ${v.result
             ? `<a class="btn-new msia-sm" href="${v.result.url}" download="${msiaEsc(msiaFileName(v.title, v.result.extension))}"><i class="ti ti-download"></i> Download ${v.result.extension.toUpperCase()} · ${v.result.sizeMb} MB</a>
-               <button type="button" class="btn-secondary msia-sm" onclick="msiaCreate('${id}')" ${canCreate ? '' : 'disabled'}><i class="ti ti-refresh"></i> New footage</button>`
+               <button type="button" class="btn-secondary msia-sm" onclick="msiaCreate('${id}')" ${canCreate ? '' : 'disabled'}><i class="ti ti-refresh"></i> ${hasPhotos ? 'Create again' : 'New footage'}</button>`
             : `<button type="button" class="btn-new msia-sm" onclick="msiaCreate('${id}')" ${canCreate ? '' : 'disabled'}><i class="ti ti-movie"></i> ${v.error ? 'Try again' : 'Create video'}</button>`}
           <button type="button" class="btn-secondary msia-sm" onclick="msiaToggleOptions('${id}')"><i class="ti ti-adjustments"></i> Edit script &amp; options</button>
         </div>
-        ${v.result ? `<div class="msia-note">Footage: ${msiaEsc(v.result.credits.join(', '))} via Pexels (free for commercial use).</div>` : ''}
+        ${v.result && v.result.credits.length ? `<div class="msia-note">Footage: ${msiaEsc(v.result.credits.join(', '))} via Pexels (free for commercial use).</div>` : ''}
         ${locked && !v.result ? '<div class="msia-note">Another video is being edited — this one can start when it finishes.</div>' : ''}`}
     </div>
   </div>
@@ -310,7 +344,10 @@ function msiaOptionsHtml(id, v, lang) {
 <div class="msia-options">
   <label>Title (file name)<input class="form-input" dir="auto" value="${msiaEsc(v.title)}" oninput="MSIA.videos['${id}'].title=this.value"></label>
   <label>Voice-over text — the narrator reads exactly this<textarea class="form-input" rows="6" dir="auto" oninput="MSIA.videos['${id}'].script=this.value">${msiaEsc(v.script)}</textarea></label>
-  <div class="msia-opt-label">Footage keywords (English works best)</div>
+  <div class="msia-opt-label">Your photos ${v.photos.length ? `(${v.photos.length}) — used instead of stock footage` : '— optional, replaces stock footage'}</div>
+  <div class="msia-photos">${v.photos.map((f, i) => `<div class="msia-photo"><img src="${msiaThumb(f)}" alt=""><button type="button" onclick="msiaRemovePhoto('${id}',${i})" aria-label="Remove photo"><i class="ti ti-x"></i></button></div>`).join('')}
+    ${v.photos.length < MSIA_MAX_PHOTOS ? `<label class="msia-photo-add"><i class="ti ti-photo-plus"></i><span>Add photos</span><input type="file" accept="image/*" multiple hidden onchange="msiaAddPhotos('${id}',this.files)"></label>` : ''}</div>
+  <div class="msia-opt-label">Footage keywords (English works best)${v.photos.length ? ' — only used without photos' : ''}</div>
   <div class="msia-chips">${v.keywords.map((k, i) => `<span class="msia-chip">${msiaEsc(k)}<button type="button" onclick="msiaRemoveKeyword('${id}',${i})" aria-label="Remove"><i class="ti ti-x"></i></button></span>`).join('')}
     <input class="msia-chip-input" placeholder="add keyword + Enter" onkeydown="if(event.key==='Enter'){event.preventDefault();msiaAddKeyword('${id}',this.value)}"></div>
   <div class="msia-grid2">
@@ -352,6 +389,21 @@ function msiaSetLanguage(id, code) { const v = MSIA.videos[id]; v.language = cod
 function msiaSetFormat(id, format) { MSIA.videos[id].format = format; msiaRenderVideo(id); }
 function msiaSetMusic(id, file) { MSIA.videos[id].music = file || null; msiaRenderVideo(id); }
 function msiaCancel(id) { MSIA.videos[id]?.abort?.abort(); }
+
+const MSIA_MAX_PHOTOS = 20;
+const _msiaThumbs = new WeakMap();
+// One object URL per photo, reused across re-renders instead of leaking a new one each time.
+function msiaThumb(file) {
+  if (!_msiaThumbs.has(file)) _msiaThumbs.set(file, URL.createObjectURL(file));
+  return _msiaThumbs.get(file);
+}
+const msiaImageFiles = (files) => Array.from(files || []).filter((f) => f && /^image\//.test(f.type));
+function msiaAddPhotos(id, files) {
+  const v = MSIA.videos[id];
+  v.photos = v.photos.concat(msiaImageFiles(files)).slice(0, MSIA_MAX_PHOTOS);
+  msiaRenderVideo(id);
+}
+function msiaRemovePhoto(id, i) { MSIA.videos[id].photos.splice(i, 1); msiaRenderVideo(id); }
 function msiaRenderAllVideos() { Object.keys(MSIA.videos).forEach(msiaRenderVideo); Object.keys(MSIA.demos).forEach(msiaRenderDemo); }
 
 function msiaFileName(title, ext) {
@@ -369,7 +421,8 @@ function msiaB64ToBuffer(b64) {
 async function msiaCreate(id) {
   const v = MSIA.videos[id];
   if (!v || v.phase === 'working' || (MSIA.renderingId && MSIA.renderingId !== id)) return;
-  if (!(MSIA.status && MSIA.status.pexels) || !msiaPickMime() || !v.script.trim() || !v.keywords.length) { msiaRenderVideo(id); return; }
+  const hasPhotos = v.photos.length > 0;
+  if (!(hasPhotos || (MSIA.status && MSIA.status.pexels)) || !msiaPickMime() || !v.script.trim() || !(hasPhotos || v.keywords.length)) { msiaRenderVideo(id); return; }
   const fmtInfo = MSIA_FORMATS.find((f) => f.id === v.format) || MSIA_FORMATS[0];
   const controller = new AbortController();
   if (v.result) URL.revokeObjectURL(v.result.url);
@@ -385,7 +438,8 @@ async function msiaCreate(id) {
     refresh();
     const words = v.script.trim().split(/\s+/).length;
     const clipCount = Math.min(12, Math.max(3, Math.ceil(words / 2.4 / 4) + 1));
-    const footage = await msiaPost('/api/msia/footage', { keywords: v.keywords, orientation: v.format, count: clipCount }, controller.signal);
+    // With the user's photos there is nothing to fetch: they are edited straight from this browser.
+    const footage = hasPhotos ? { clips: [] } : await msiaPost('/api/msia/footage', { keywords: v.keywords, orientation: v.format, count: clipCount }, controller.signal);
     let lastPaint = 0;
     const rendered = await msiaRenderVideoFile({
       canvas: v.canvas,
@@ -394,6 +448,7 @@ async function msiaCreate(id) {
       voice: msiaB64ToBuffer(voice.audio),
       words: voice.words,
       clipUrls: footage.clips.map((c) => c.url),
+      photos: v.photos,
       captions: v.captions,
       rtl: !!msiaLang(v.language).rtl,
       brand: String(v.brand || '').trim(),
@@ -480,11 +535,12 @@ function msiaRoundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
 
-function msiaDrawCover(ctx, video, w, h, zoom) {
-  const vw = video.videoWidth, vh = video.videoHeight;
+// Draws a video frame or photo so it covers the whole canvas (cropping the overflow).
+function msiaDrawCover(ctx, src, w, h, zoom, panX = 0, panY = 0) {
+  const vw = src.videoWidth || src.naturalWidth || src.width, vh = src.videoHeight || src.naturalHeight || src.height;
   if (!vw || !vh) return;
   const s = Math.max(w / vw, h / vh) * zoom;
-  ctx.drawImage(video, (w - vw * s) / 2, (h - vh * s) / 2, vw * s, vh * s);
+  ctx.drawImage(src, (w - vw * s) / 2 + panX, (h - vh * s) / 2 + panY, vw * s, vh * s);
 }
 
 function msiaDrawCaption(ctx, cap, t, w, h, rtl) {
@@ -565,24 +621,47 @@ async function msiaRenderVideoFile(input) {
     const segLen = total / segments;
     const wanted = Math.min(segments, MSIA_MAX_CLIPS);
 
-    // Three downloads at a time; broken clips are skipped.
-    let tried = 0;
-    while (clips.length < wanted && tried < input.clipUrls.length) {
-      const batch = input.clipUrls.slice(tried, tried + 3);
-      tried += batch.length;
-      const results = await Promise.allSettled(batch.map((u) => msiaLoadClip(u, signal)));
-      if (signal.aborted) throw msiaAbortError();
-      for (const r of results) if (r.status === 'fulfilled' && clips.length < wanted) clips.push(r.value);
-      input.onProgress('footage', Math.min(1, clips.length / wanted));
+    // The user's own photos replace stock footage: each gets a slow zoom/pan, with crossfades.
+    const photos = [];
+    if (input.photos && input.photos.length) {
+      for (let i = 0; i < input.photos.length; i++) {
+        try { photos.push(await msiaLoadPhoto(input.photos[i])); } catch { /* an unreadable photo is skipped */ }
+        if (signal.aborted) throw msiaAbortError();
+        input.onProgress('footage', (i + 1) / input.photos.length);
+      }
+      if (!photos.length) throw new Error("None of the photos could be opened. Use JPG or PNG files.");
+    } else {
+      // Three downloads at a time; broken clips are skipped.
+      let tried = 0;
+      while (clips.length < wanted && tried < input.clipUrls.length) {
+        const batch = input.clipUrls.slice(tried, tried + 3);
+        tried += batch.length;
+        const results = await Promise.allSettled(batch.map((u) => msiaLoadClip(u, signal)));
+        if (signal.aborted) throw msiaAbortError();
+        for (const r of results) if (r.status === 'fulfilled' && clips.length < wanted) clips.push(r.value);
+        input.onProgress('footage', Math.min(1, clips.length / wanted));
+      }
+      if (!clips.length) throw new Error('None of the footage clips could be downloaded. Check your connection and try again.');
     }
-    if (!clips.length) throw new Error('None of the footage clips could be downloaded. Check your connection and try again.');
 
-    // Per segment: which clip, and where in it to start, so long clips show varied moments.
-    const plan = Array.from({ length: segments }, (_, i) => {
+    // Photos: every photo is shown (2.2–5 s each), cycling if the narration is longer.
+    // Clips: which clip per segment, and where in it to start, so long clips show varied moments.
+    const photoMode = photos.length > 0;
+    const segCount = photoMode ? Math.max(1, Math.round(total / Math.min(5, Math.max(2.2, total / photos.length)))) : segments;
+    const segDur = total / segCount;
+    const plan = Array.from({ length: segCount }, (_, i) => {
+      if (photoMode) return { photo: photos[i % photos.length] };
       const video = clips[i % clips.length];
-      const room = video.duration - segLen - 0.2;
+      const room = video.duration - segDur - 0.2;
       return { video, offset: Number.isFinite(room) && room > 0 ? Math.random() * room : 0 };
     });
+    // Ken Burns move for a photo segment at progress p (0..1): alternating zoom in/out and pan.
+    const photoMove = (seg, p) => {
+      const zoomIn = seg % 2 === 0;
+      const zoom = zoomIn ? 1.04 + 0.1 * p : 1.14 - 0.1 * p;
+      const dir = (seg % 3) - 1;
+      return { zoom, panX: dir * 0.035 * W * (p - 0.5), panY: (seg % 2 ? 1 : -1) * 0.02 * H * (p - 0.5) };
+    };
 
     let musicBuffer = null;
     if (input.music) {
@@ -635,30 +714,45 @@ async function msiaRenderVideoFile(input) {
       musicSrc.start(t0);
     }
     recorder.start(1000);
-    plan[0].video.currentTime = plan[0].offset;
+    if (!photoMode) plan[0].video.currentTime = plan[0].offset;
     let active = -1;
+    const CROSSFADE = 0.5;
 
     await new Promise((resolve, reject) => {
       const frame = () => {
         if (signal.aborted) { reject(msiaAbortError()); return; }
         const t = Math.max(0, audioCtx.currentTime - t0);
         if (t >= total) { resolve(); return; }
-        const seg = Math.min(segments - 1, Math.floor(t / segLen));
-        if (seg !== active) {
-          const prev = active >= 0 ? plan[active].video : null;
-          const cur = plan[seg];
-          if (prev && prev !== cur.video) prev.pause();
-          if (prev !== cur.video) cur.video.currentTime = cur.offset;
-          cur.video.play().catch(() => {});
-          // Seek the next clip now so it is ready the moment its segment starts.
-          const next = plan[seg + 1];
-          if (next && next.video !== cur.video) next.video.currentTime = next.offset;
-          active = seg;
+        const seg = Math.min(segCount - 1, Math.floor(t / segDur));
+        const p = (t - seg * segDur) / segDur;
+        if (photoMode) {
+          const m = photoMove(seg, p);
+          baseCtx.globalAlpha = 1;
+          const intoSeg = t - seg * segDur;
+          if (seg > 0 && intoSeg < CROSSFADE) {
+            // Crossfade: previous photo at the end of its move, then the new one fading in on top.
+            const pm = photoMove(seg - 1, 1);
+            msiaDrawCover(baseCtx, plan[seg - 1].photo, W, H, pm.zoom, pm.panX, pm.panY);
+            baseCtx.globalAlpha = intoSeg / CROSSFADE;
+          }
+          msiaDrawCover(baseCtx, plan[seg].photo, W, H, m.zoom, m.panX, m.panY);
+          baseCtx.globalAlpha = 1;
+        } else {
+          if (seg !== active) {
+            const prev = active >= 0 ? plan[active].video : null;
+            const cur = plan[seg];
+            if (prev && prev !== cur.video) prev.pause();
+            if (prev !== cur.video) cur.video.currentTime = cur.offset;
+            cur.video.play().catch(() => {});
+            // Seek the next clip now so it is ready the moment its segment starts.
+            const next = plan[seg + 1];
+            if (next && next.video !== cur.video) next.video.currentTime = next.offset;
+            active = seg;
+          }
+          const { video } = plan[seg];
+          const zoom = seg % 2 === 0 ? 1 + 0.07 * p : 1.07 - 0.07 * p;
+          if (video.readyState >= 2 && !video.seeking) msiaDrawCover(baseCtx, video, W, H, zoom);
         }
-        const { video } = plan[seg];
-        const p = (t - seg * segLen) / segLen;
-        const zoom = seg % 2 === 0 ? 1 + 0.07 * p : 1.07 - 0.07 * p;
-        if (video.readyState >= 2 && !video.seeking) msiaDrawCover(baseCtx, video, W, H, zoom);
         ctx.globalAlpha = 1;
         ctx.drawImage(base, 0, 0);
         ctx.fillStyle = shade; ctx.fillRect(0, 0, W, H);
@@ -685,6 +779,22 @@ async function msiaRenderVideoFile(input) {
     cancelAnimationFrame(rafId);
     clips.forEach((c) => { c.pause(); URL.revokeObjectURL(c.src); c.removeAttribute('src'); c.load(); });
     audioCtx.close().catch(() => {});
+  }
+}
+
+// Decodes a user photo, honouring its EXIF orientation (phone pictures are often rotated).
+async function msiaLoadPhoto(file) {
+  if (typeof createImageBitmap === 'function') {
+    try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch { /* fall back below */ }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return img;
+  } finally {
+    URL.revokeObjectURL(url);
   }
 }
 
