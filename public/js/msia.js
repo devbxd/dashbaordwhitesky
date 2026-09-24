@@ -1,4 +1,4 @@
-/* M&S IA — chat assistant + video maker (server side: /msia.js).
+/* M&S AI — chat assistant + video maker (server side: /msia.js).
    One chat: ask about this account's data, or ask for a video. Videos are edited right
    here in the browser (canvas + MediaRecorder), so they cost nothing to produce. */
 
@@ -19,7 +19,7 @@ const MSIA_SUGGESTIONS = [
   { icon: 'ti-alarm', label: 'Coming up', prompt: 'What deadlines are coming up soon (passports, visas, invoices due)?' },
   { icon: 'ti-brand-whatsapp', label: 'Payment reminder', prompt: 'Draft a polite WhatsApp reminder in Arabic for clients with overdue invoices.' },
   { icon: 'ti-movie', label: 'Promo video', prompt: 'Make a 30-second vertical video in Arabic promoting our travel agency.' },
-  { icon: 'ti-device-desktop', label: 'Live demo of the system', prompt: 'Fais une vidéo démo en direct du système qui présente ses principales fonctionnalités, en français.' },
+  { icon: 'ti-device-desktop', label: 'Live demo of the system', prompt: 'Make a live demo video of the system that presents its main features, in English.' },
 ];
 
 const MSIA_FORMATS = [
@@ -97,7 +97,7 @@ async function pageMsIa(mc) {
   <div class="msia-head">
     <div class="msia-head-id">
       <div class="msia-logo"><i class="ti ti-sparkles"></i></div>
-      <div><div class="page-title">M&amp;S IA</div><div class="page-sub">Ask about your business, or ask for a video.</div></div>
+      <div><div class="page-title">M&amp;S AI</div><div class="page-sub">Ask about your business, or ask for a video.</div></div>
     </div>
     <button class="btn-secondary msia-new ${MSIA.messages.length ? '' : 'hidden'}" id="msia-new" onclick="msiaNewChat()"><i class="ti ti-edit"></i> New chat</button>
   </div>
@@ -105,10 +105,10 @@ async function pageMsIa(mc) {
   <div class="msia-scroll" id="msia-scroll"><div class="msia-thread" id="msia-thread"></div></div>
   <form class="msia-composer" id="msia-form">
     <div class="msia-input-row">
-      <textarea id="msia-input" rows="1" dir="auto" placeholder="${st.ai ? 'Ask a question or describe the video you want…' : 'M&S IA needs an AI key to work'}" ${st.ai ? '' : 'disabled'}></textarea>
+      <textarea id="msia-input" rows="1" dir="auto" placeholder="${st.ai ? 'Ask a question or describe the video you want…' : 'M&S AI needs an AI key to work'}" ${st.ai ? '' : 'disabled'}></textarea>
       <button type="submit" class="msia-send" id="msia-send" aria-label="Send" disabled><i class="ti ti-arrow-up"></i></button>
     </div>
-    <div class="msia-foot">M&amp;S IA only sees this account's data and never changes it. Check important answers before acting on them.</div>
+    <div class="msia-foot">M&amp;S AI only sees this account's data and never changes it. Check important answers before acting on them.</div>
   </form>
 </div>`;
   const input = document.getElementById('msia-input');
@@ -141,7 +141,7 @@ function msiaRenderThread() {
 <div class="msia-empty">
   <div class="msia-empty-logo"><i class="ti ti-sparkles"></i></div>
   <h2>Hello${currentUser && currentUser.display_name ? ', ' + msiaEsc(currentUser.display_name.split(' ')[0]) : ''} 👋</h2>
-  <p>I know your invoices, clients, payments and bookings — and I can make ready-to-post videos with voice-over and captions, in Arabic, French or English.</p>
+  <p>I know your invoices, clients, payments and bookings — and I can make ready-to-post videos with voice-over and captions, in Arabic or English.</p>
   <div class="msia-suggestions">${MSIA_SUGGESTIONS.map((s, i) => `
     <button type="button" class="msia-sugg" onclick="msiaSend(MSIA_SUGGESTIONS[${i}].prompt)" ${st.ai ? '' : 'disabled'}>
       <span class="msia-sugg-icon"><i class="ti ${s.icon}"></i></span>
@@ -166,7 +166,7 @@ function msiaRenderThread() {
 }
 
 // What the model sees of earlier turns: video cards are summarised so "make it shorter" or
-// "now in French" have the script to work from.
+// "now in Arabic" have the script to work from.
 function msiaHistoryText(m) {
   const notes = (m.videoIds || []).map((id) => {
     const v = MSIA.videos[id];
@@ -693,8 +693,8 @@ async function msiaRenderVideoFile(input) {
    the app opens each scene's page, highlights it and scrolls through it while the narration
    plays, and captions + branding are drawn as a DOM overlay so they land in the recording. */
 
-const MSIA_DEMO_END = { ar: 'شكراً لمشاهدتكم', fr: "Merci d'avoir regardé", en: 'Thanks for watching' };
-const MSIA_DEMO_TAG = { ar: 'عرض مباشر', fr: 'Démo en direct', en: 'Live demo' };
+const MSIA_DEMO_END = { ar: 'شكراً لمشاهدتكم', en: 'Thanks for watching' };
+const MSIA_DEMO_TAG = { ar: 'عرض مباشر', en: 'Live demo' };
 
 function msiaNewDemo(req) {
   return { ...req, brand: msiaBrand(), blur: true, phase: 'idle', progress: 0, error: null, result: null, showOptions: false, abort: null };

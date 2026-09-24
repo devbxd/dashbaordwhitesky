@@ -1,8 +1,8 @@
-// M&S IA — the dashboard's AI assistant and video maker.
+// M&S AI — the dashboard's AI assistant and video maker.
 //
 // Chat:  Groq (Gemini as fallback) answers questions about the signed-in account's data through read-only
 //        tools. Every tool reads through this app's own GET endpoints, called with the
-//        user's session cookie, so M&S IA sees exactly what that account already sees —
+//        user's session cookie, so M&S AI sees exactly what that account already sees —
 //        the same owner_id / isolated-tenant rules — and never another account's data.
 // Video: the AI writes the script; this module provides the voice-over (Microsoft Edge
 //        TTS, word timings included) and stock footage (Pexels). The browser does the
@@ -29,13 +29,6 @@ const LANGUAGES = [
       { id: 'ar-SA-ZariyahNeural', label: 'Zariyah — Saudi, female' },
       { id: 'ar-LB-RamiNeural', label: 'Rami — Lebanese, male' },
       { id: 'ar-LB-LaylaNeural', label: 'Layla — Lebanese, female' },
-    ],
-  },
-  {
-    code: 'fr', label: 'Français — French', rtl: false,
-    voices: [
-      { id: 'fr-FR-HenriNeural', label: 'Henri — male' },
-      { id: 'fr-FR-DeniseNeural', label: 'Denise — female' },
     ],
   },
   {
@@ -403,7 +396,7 @@ const CREATE_VIDEO_DECLARATION = {
         description:
           'The exact voice-over text the narrator reads, in the video language. About 70 words for ~30 s (default), 140 for ~60 s, 210 for ~90 s. Strong hook first, useful content, short call to action to contact the agency. Plain spoken sentences only: no emojis, hashtags, headings, lists, stage directions or speaker names.',
       },
-      language: { type: 'STRING', enum: ['ar', 'fr', 'en'], description: 'Video language. Default to the language the user writes in.' },
+      language: { type: 'STRING', enum: ['ar', 'en'], description: 'Video language. Arabic if the user writes in Arabic, otherwise English.' },
       keywords: {
         type: 'ARRAY',
         items: { type: 'STRING' },
@@ -454,7 +447,7 @@ const CREATE_DEMO_DECLARATION = {
     type: 'OBJECT',
     properties: {
       title: { type: 'STRING', description: 'Short title of the demo, in the video language.' },
-      language: { type: 'STRING', enum: ['ar', 'fr', 'en'], description: 'Narration language. Default to the language the user writes in.' },
+      language: { type: 'STRING', enum: ['ar', 'en'], description: 'Narration language. Arabic if the user writes in Arabic, otherwise English.' },
       voice_gender: { type: 'STRING', enum: ['male', 'female'] },
       scenes: {
         type: 'ARRAY',
@@ -474,7 +467,7 @@ const CREATE_DEMO_DECLARATION = {
 };
 
 function toDemoRequest(args) {
-  const language = args.language === 'fr' || args.language === 'en' ? args.language : 'ar';
+  const language = args.language === 'en' ? 'en' : 'ar';
   const scenes = (Array.isArray(args.scenes) ? args.scenes : [])
     .filter((s) => s && DEMO_PAGES[s.page] && typeof s.narration === 'string' && s.narration.trim())
     .slice(0, 8)
@@ -491,20 +484,20 @@ function toDemoRequest(args) {
 
 function systemPrompt(user, companyName) {
   const today = new Date().toISOString().slice(0, 10);
-  return `You are "M&S IA", the AI assistant built into the business dashboard of ${companyName || 'this agency'} (invoices, quotes, clients, payments, expenses, credit notes, and for travel agencies: ticket sales, hotel bookings, visas, group trips and client passports). You are talking to ${user.display_name || user.username}. Today is ${today}.
+  return `You are "M&S AI", the AI assistant built into the business dashboard of ${companyName || 'this agency'} (invoices, quotes, clients, payments, expenses, credit notes, and for travel agencies: ticket sales, hotel bookings, visas, group trips and client passports). You are talking to ${user.display_name || user.username}. Today is ${today}.
 
 You do two things:
 1. Answer questions about this account's business by calling the tools. The tools only return data this account is allowed to see — never suggest you can see other accounts. Never guess or invent numbers, names, dates or statuses; if the tools do not have it, say so. For counts and totals, use totalMatches and sums from the tools, not the length of a truncated list. Always state the currency of amounts.
 2. Make short videos for social media with create_video (stock footage + voice-over). Write the script yourself: warm, professional, trustworthy and accurate; never invent prices, dates, offers or promises (only use real figures from the tools if the user wants a video based on their data). Do not ask for confirmation first unless the request is really unclear — just make it, then in one or two sentences tell the user the video is ready to create below and that they can edit it in the card.
 3. When the user wants a video that shows or explains THIS system (a demo, tutorial, walkthrough or presentation of the dashboard and its features), use create_demo_video instead: pick the relevant pages and write the narration for each. Then tell the user in one or two sentences to press "Record demo" in the card, choose "This tab" when Chrome asks, and not touch the mouse until it finishes.
 
-Always reply in the language the user wrote in (Arabic, French or English). Be concise and practical: lead with the answer, then short bullet points or a small markdown table for lists. You can draft messages (e.g. WhatsApp payment reminders, emails to clients). You can only read data; if asked to change something, explain which page of the dashboard to use.`;
+Reply in Arabic when the user writes in Arabic, otherwise in English. Be concise and practical: lead with the answer, then short bullet points or a small markdown table for lists. You can draft messages (e.g. WhatsApp payment reminders, emails to clients). You can only read data; if asked to change something, explain which page of the dashboard to use.`;
 }
 
 function toVideoRequest(args) {
   const script = typeof args.script === 'string' ? args.script.trim() : '';
   if (!script) return null;
-  const language = args.language === 'fr' || args.language === 'en' ? args.language : 'ar';
+  const language = args.language === 'en' ? 'en' : 'ar';
   const format = args.format === 'landscape' || args.format === 'square' ? args.format : 'portrait';
   const keywords = Array.isArray(args.keywords)
     ? args.keywords.filter((k) => typeof k === 'string' && k.trim()).map((k) => k.trim()).slice(0, 10)

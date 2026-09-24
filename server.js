@@ -2470,7 +2470,7 @@ app.get('/api/upcoming', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// M&S IA — AI assistant + video maker (see msia.js). Reads data through this app's own
+// M&S AI — AI assistant + video maker (see msia.js). Reads data through this app's own
 // endpoints with the caller's session, so it sees exactly what that account can see.
 require('./msia')(app, { auth, port: PORT });
 
