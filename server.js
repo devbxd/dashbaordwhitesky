@@ -894,6 +894,64 @@ function fmtDatePdf(d) {
   const [y, m, day] = s.split('-');
   return y && m && day ? `${day}/${m}/${y}` : s;
 }
+// Itemised rows table shared by invoices and quotes, styled like the on-screen invoice (navy
+// header band, zebra rows). Each row is as tall as its tallest cell — a fixed row height is
+// what made long visa references and date ranges spill into the next row/column — and
+// PNR/destination/price shrink to fit on one line before they're ever allowed to wrap, since
+// digit-hyphen-digit references have no legal break point and would otherwise split mid-number.
+function pdfItemsTable(doc, { x, y, width, airlineLabel, dataRows }) {
+  const NAVY = '#0a3258', ZEBRA = '#f7f9fc', LINE = '#eef1f6';
+  const pageH = doc.page.height;
+  const PAD_X = 6, PAD_Y = 5.5, BODY = 9.5;
+  const widths = [100, 92, 110, 60, 70];
+  widths.push(width - widths.reduce((a, b) => a + b, 0));
+  const labels = ['PNR #', 'DESTINATION', 'PASSENGER', airlineLabel, 'DATE', 'PRICE'];
+  const right = [false, false, false, false, false, true];
+  const bold = [true, false, false, false, false, true];
+  const shrink = [true, true, false, false, false, true];
+  const fitSize = (text, w, font, size, min) => {
+    let sz = size;
+    doc.font(font);
+    while (sz > min && doc.fontSize(sz).widthOfString(text) > w) sz -= 0.25;
+    return sz;
+  };
+
+  function drawHeader(yy) {
+    doc.rect(x, yy, width, 22).fill(NAVY);
+    let cx = x;
+    labels.forEach((label, i) => {
+      const inner = widths[i] - PAD_X * 2;
+      const sz = fitSize(label, inner, 'Helvetica-Bold', 8.5, 6.5);
+      doc.font('Helvetica-Bold').fontSize(sz).fillColor('#ffffff').text(label, cx + PAD_X, yy + 7, { width: inner, align: right[i] ? 'right' : 'left', lineBreak: false });
+      cx += widths[i];
+    });
+    return yy + 22;
+  }
+
+  y = drawHeader(y);
+  dataRows.forEach((vals, idx) => {
+    const cells = vals.map((v, i) => {
+      const text = String(v === undefined || v === null || v === '' ? '—' : v);
+      const font = bold[i] ? 'Helvetica-Bold' : 'Helvetica';
+      const inner = widths[i] - PAD_X * 2;
+      const size = shrink[i] ? fitSize(text, inner, font, BODY, 7) : BODY;
+      const h = doc.font(font).fontSize(size).heightOfString(text, { width: inner, align: right[i] ? 'right' : 'left' });
+      return { text, font, size, inner, h };
+    });
+    const rowH = Math.max(...cells.map(c => c.h)) + PAD_Y * 2;
+    if (y + rowH > pageH - 50) { doc.addPage(); y = drawHeader(40); }
+    if (idx % 2 === 1) doc.rect(x, y, width, rowH).fill(ZEBRA);
+    let cx = x;
+    cells.forEach((c, i) => {
+      doc.font(c.font).fontSize(c.size).fillColor(i === 0 ? NAVY : '#333333').text(c.text, cx + PAD_X, y + PAD_Y, { width: c.inner, align: right[i] ? 'right' : 'left' });
+      cx += widths[i];
+    });
+    y += rowH;
+    doc.moveTo(x, y).lineTo(x + width, y).lineWidth(0.5).strokeColor(LINE).stroke();
+  });
+  return y;
+}
+
 // Pure drawing function — no req/res, no DB — so it can be exercised directly with fake data
 // instead of only ever being checked by clicking the button in a live app.
 function renderInvoicePdf(doc, { inv, rows, s, qrBuffer, cyber }) {
@@ -938,37 +996,12 @@ function renderInvoicePdf(doc, { inv, rows, s, qrBuffer, cyber }) {
 
   // Table
   const airlineLabel = cyber ? 'CATEGORY' : (rows.some(r => r.airline === 'Hotel') ? 'HOTEL' : 'AIRLINE');
-  const cols = [
-    { key: 'pnr', label: 'PNR #', w: 65 },
-    { key: 'destination', label: 'DESTINATION', w: 95 },
-    { key: 'passenger', label: 'PASSENGER', w: 140 },
-    { key: 'airline', label: airlineLabel, w: 70 },
-    { key: 'travel_date', label: 'DATE', w: 75, fmt: fmtDatePdf },
-    { key: 'price', label: 'PRICE', w: 0, align: 'right', fmt: (v) => fmt(v) },
-  ];
-  cols[cols.length - 1].w = (pageW - marginX * 2) - cols.slice(0, -1).reduce((a, c) => a + c.w, 0);
-  let x = marginX;
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(SOFT);
-  for (const c of cols) { doc.text(c.label, x, y, { width: c.w, align: c.align || 'left' }); x += c.w; }
-  y += 14;
-  doc.moveTo(marginX, y).lineTo(pageW - marginX, y).lineWidth(1).strokeColor(LINE).stroke();
-  y += 8;
-
-  for (const r of rows) {
-    const rowH = 20;
-    x = marginX;
-    doc.font('Helvetica').fontSize(9.5).fillColor('#333333');
-    for (const c of cols) {
-      const raw = c.key === 'pnr' ? r.pnr : c.key === 'destination' ? r.destination : c.key === 'passenger' ? r.passenger : c.key === 'airline' ? r.airlineRef : c.key === 'travel_date' ? r.travel_date : r.price;
-      const val = c.fmt ? c.fmt(raw) : (raw || '—');
-      doc.font(c.key === 'pnr' || c.key === 'price' ? 'Helvetica-Bold' : 'Helvetica').fillColor(c.key === 'pnr' ? NAVY : '#333333').text(String(val), x, y, { width: c.w, align: c.align || 'left' });
-      x += c.w;
-    }
-    y += rowH;
-    doc.moveTo(marginX, y - 4).lineTo(pageW - marginX, y - 4).lineWidth(0.5).strokeColor('#f0f3f8').stroke();
-  }
+  const dataRows = rows.map(r => [r.pnr, r.destination, r.passenger, r.airlineRef, fmtDatePdf(r.travel_date), fmt(r.price)]);
+  y = pdfItemsTable(doc, { x: marginX, y, width: pageW - marginX * 2, airlineLabel, dataRows });
 
   y += 14;
+  // Totals + signature block need ~240pt; start them on a fresh page rather than running off the bottom
+  if (y + 240 > doc.page.height) { doc.addPage(); y = 40; }
   // Totals box, right-aligned
   const boxW = 250, boxX = pageW - marginX - boxW;
   const totalRows = [
@@ -1174,17 +1207,8 @@ function renderQuotePdf(doc, { qt, rows, s, cyber }) {
   y = Math.max(doc.y, y + 60) + 18;
 
   const airlineLabel = cyber ? 'CATEGORY' : (rows.some(r => r.airline === 'Hotel') ? 'HOTEL' : 'AIRLINE');
-  const cols = [
-    { label: 'PNR #', w: 65, bold: true, color: NAVY },
-    { label: 'DESTINATION', w: 95 },
-    { label: 'PASSENGER', w: 140 },
-    { label: airlineLabel, w: 70 },
-    { label: 'DATE', w: 75 },
-    { label: 'PRICE', w: 0, align: 'right', bold: true },
-  ];
-  cols[cols.length - 1].w = (pageW - marginX * 2) - cols.slice(0, -1).reduce((a, c) => a + c.w, 0);
   const dataRows = rows.map(r => [r.pnr, r.destination, r.passenger, r.airlineRef, fmtDatePdf(r.travel_date), money(r.price, qt.currency)]);
-  y = pdfTable(doc, { x: marginX, y, colsRight: pageW - marginX, cols, dataRows });
+  y = pdfItemsTable(doc, { x: marginX, y, width: pageW - marginX * 2, airlineLabel, dataRows });
 
   y += 14;
   const boxW = 250, boxX = pageW - marginX - boxW;
